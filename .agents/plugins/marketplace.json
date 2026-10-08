@@ -1,0 +1,10 @@
+{
+  "name": "chat-tree",
+  "interface": {"displayName": "Chat Tree"},
+  "plugins": [{
+    "name": "chat-tree",
+    "source": {"source": "local", "path": "./plugins/chat-tree"},
+    "policy": {"installation": "AVAILABLE", "authentication": "ON_INSTALL"},
+    "category": "Productivity"
+  }]
+}

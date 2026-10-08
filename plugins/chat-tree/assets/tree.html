@@ -1,0 +1,389 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Chat Tree</title>
+<style>
+:root{color-scheme:light dark;
+  --bg:light-dark(#ffffff,#191919);--surface:light-dark(#f6f6f7,#212121);--raised:light-dark(#ffffff,#262626);
+  --hover:light-dark(rgba(0,0,0,.04),rgba(255,255,255,.05));--selected:light-dark(rgba(0,0,0,.06),rgba(255,255,255,.075));
+  --line:light-dark(#e7e7e9,#2c2c2c);--line-strong:light-dark(#d6d6da,#3a3a3a);
+  --text:light-dark(#1d1d1f,#ececec);--muted:light-dark(#6c6c70,#9b9b9b);--faint:light-dark(#a1a1a6,#646464);
+  --done:light-dark(#2e8b57,#5cc28c);--done-soft:light-dark(#e6f4ec,#1d3326);
+  --work:light-dark(#2f6fe4,#6ea6ff);--work-soft:light-dark(#e8f0fd,#1c2a40);
+  --warn:light-dark(#a86400,#e8b45a);--warn-soft:light-dark(#fbf1e1,#3a2d17);
+  --danger:light-dark(#c4313b,#ff8a8f);
+  --radius:8px;--indent:22px}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg);color:var(--text)}
+body{font:13px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif;-webkit-font-smoothing:antialiased}
+button,input,textarea{font:inherit;color:inherit}
+button{cursor:pointer;background:none;border:0;padding:0}
+button:disabled{cursor:default;opacity:.45}
+:focus-visible{outline:2px solid var(--work);outline-offset:1px;border-radius:5px}
+h1,h2,p{margin:0}
+svg{display:block;flex:none}
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
+
+/* Buttons */
+.btn{display:inline-flex;align-items:center;gap:6px;height:28px;padding:0 10px;border-radius:7px;border:1px solid var(--line-strong);background:var(--raised);font-size:12.5px;font-weight:500;white-space:nowrap}
+.btn:hover:not(:disabled){background:var(--hover)}
+.btn.primary{background:var(--text);color:var(--bg);border-color:transparent}
+.btn.primary:hover:not(:disabled){background:var(--text);opacity:.88}
+.btn.ghost{border-color:transparent;background:none;color:var(--muted)}
+.btn.ghost:hover:not(:disabled){color:var(--text);background:var(--hover)}
+.icon-btn{display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;border-radius:7px;color:var(--muted)}
+.icon-btn:hover:not(:disabled),.icon-btn[aria-expanded=true],.icon-btn[aria-pressed=true]{color:var(--text);background:var(--hover)}
+
+/* Header */
+header{position:sticky;top:0;z-index:5;background:var(--bg);padding:10px 12px 8px;border-bottom:1px solid var(--line)}
+.bar{display:flex;align-items:center;gap:4px;min-width:0}
+.switcher{display:flex;align-items:center;gap:7px;min-width:0;flex:0 1 auto;margin-right:auto;padding:4px 6px;margin-left:-6px;border-radius:7px;text-align:left}
+.switcher:hover,.switcher[aria-expanded=true]{background:var(--hover)}
+.switcher h1{font-size:14px;font-weight:600;line-height:1.3;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+.switcher .tree-icon{color:var(--done)}
+.switcher .chev{color:var(--muted)}
+.tools{display:flex;gap:2px;flex:none}
+.parent-link{display:inline-flex;align-items:center;gap:5px;min-width:0;flex:0 1 auto;padding:3px 6px;margin-left:-6px;border-radius:6px;color:var(--muted);font-size:12.5px}
+.parent-link .label{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.parent-link:hover{color:var(--text);background:var(--hover)}
+.crumb-meta{flex:1 1 auto;min-width:0;margin-left:2px;font-size:12px;color:var(--faint);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.focus-title{display:flex;align-items:flex-start;gap:4px;margin:6px 0 2px -5px}
+.focus-title h1{flex:1;min-width:0;font-size:15px;font-weight:600;line-height:22px;padding-top:2px;overflow-wrap:anywhere}
+.focus-title .pill{margin-top:3px}
+.detail.focus-detail{margin:0;padding:6px 12px 2px 37px;background:none;border:0;border-radius:0}
+.detail.focus-detail .description{margin-top:0;color:var(--muted)}
+.detail.focus-detail .actions{margin-top:8px}
+.section-head{display:flex;align-items:baseline;justify-content:space-between;gap:8px;margin:10px 12px 0;padding-top:10px;border-top:1px solid var(--line)}
+.section-head h2{font-size:11px;font-weight:600;color:var(--faint);text-transform:uppercase;letter-spacing:.05em}
+.progress{display:flex;align-items:center;gap:10px;margin-top:8px}
+.segments{display:flex;gap:3px;flex:1;height:4px;min-width:40px}
+.segments span{flex:1;border-radius:2px;background:var(--line-strong)}
+.segments .done{background:var(--done)}
+.segments .working{background:var(--work)}
+.segments .stale{background:var(--warn)}
+.segments.solid span{border-radius:2px}
+.progress-text{font-size:12px;color:var(--muted);white-space:nowrap}
+.progress-text b{color:var(--text);font-weight:600}
+.search{display:flex;align-items:center;gap:6px;margin-top:8px;padding:0 8px;height:30px;border-radius:7px;background:var(--surface);border:1px solid var(--line);color:var(--muted)}
+.search input{flex:1;min-width:0;border:0;background:none;outline:none;color:var(--text);font-size:13px}
+.search:focus-within{border-color:var(--line-strong)}
+
+/* Banners and cards */
+.stack{display:flex;flex-direction:column;gap:8px;padding:10px 12px 0}
+.banner{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:8px 10px;border-radius:var(--radius);background:var(--surface);border:1px solid var(--line);font-size:12.5px}
+.banner .grow{flex:1;min-width:160px}
+.banner.work{background:var(--work-soft);border-color:transparent}
+.banner.warn{background:var(--warn-soft);border-color:transparent}
+.banner strong{font-weight:600}
+.proposal{border:1px solid var(--line-strong);border-radius:10px;padding:10px 12px;background:var(--surface)}
+.proposal .kicker{font-size:11px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:var(--work)}
+.proposal h2{font-size:13px;font-weight:600;margin-top:3px}
+.proposal ul{margin:6px 0 0;padding:0;list-style:none}
+.proposal li{display:flex;gap:8px;padding:3px 0}
+.proposal li svg{margin-top:2px;color:var(--faint)}
+.proposal .field{margin-top:6px;font-size:12.5px;white-space:pre-wrap;overflow-wrap:anywhere}
+.proposal .field span{color:var(--muted)}
+.proposal .note{margin-top:6px;font-size:12px;color:var(--warn)}
+.card-actions{display:flex;gap:6px;margin-top:10px;flex-wrap:wrap}
+
+/* Outline */
+.outline{padding:6px 6px 16px}
+.children{margin-left:calc(var(--indent) - 1px);padding-left:0;border-left:1px solid var(--line)}
+.row{position:relative;display:flex;align-items:flex-start;gap:2px;min-height:32px;padding:3px 6px 3px 2px;border-radius:7px}
+.row:hover{background:var(--hover)}
+.row.selected{background:var(--selected)}
+.twisty{width:20px;height:26px;display:flex;align-items:center;justify-content:center;color:var(--faint);border-radius:5px;flex:none}
+.twisty:hover:not(:disabled){color:var(--text)}
+.twisty svg{transition:transform .15s}
+.twisty[aria-expanded=true] svg{transform:rotate(90deg)}
+.twisty:disabled{visibility:hidden}
+.check{width:26px;height:26px;display:flex;align-items:center;justify-content:center;border-radius:6px;flex:none}
+.check:hover:not(:disabled){background:var(--hover)}
+.check:disabled{opacity:1;cursor:default}
+.title{flex:1;min-width:0;text-align:left;padding:4px 4px;font-size:13px;line-height:18px;overflow-wrap:anywhere}
+.row.done .title{color:var(--muted)}
+.row.done .title .text{text-decoration:line-through;text-decoration-color:var(--faint)}
+.row.current .title{font-weight:600}
+.count{margin-left:6px;font-size:11.5px;color:var(--faint);font-variant-numeric:tabular-nums;font-weight:400}
+.row-end{display:flex;align-items:center;gap:4px;flex:none;height:26px}
+.pill{display:inline-flex;align-items:center;height:20px;padding:0 7px;border-radius:10px;font-size:11px;font-weight:500;white-space:nowrap;background:var(--surface);color:var(--muted);border:1px solid var(--line)}
+.pill.here{background:var(--work-soft);color:var(--work);border-color:transparent}
+.pill.working{color:var(--work);border-color:transparent;background:var(--work-soft)}
+.pill.stale{color:var(--warn);border-color:transparent;background:var(--warn-soft)}
+.pill.done{color:var(--done);border-color:transparent;background:var(--done-soft)}
+.chat-btn{display:inline-flex;align-items:center;gap:4px;height:24px;padding:0 7px;border-radius:6px;font-size:12px;color:var(--muted);white-space:nowrap}
+.chat-btn:hover:not(:disabled){background:var(--hover);color:var(--text)}
+.chat-btn.start{color:var(--text);border:1px solid var(--line-strong);background:var(--raised)}
+@media (hover:hover){.row .reveal{opacity:0;pointer-events:none}.row:hover .reveal,.row:focus-within .reveal,.row.selected .reveal{opacity:1;pointer-events:auto}}
+.row.selected .reveal{display:none}
+
+/* Status icon */
+.status circle,.status path{vector-effect:non-scaling-stroke}
+.status.new{color:var(--faint)}
+.status.ready{color:var(--muted)}
+.status.working,.status.busy{color:var(--work)}
+.status.busy{color:var(--warn)}
+.status.done{color:var(--done)}
+.status.stale{color:var(--warn)}
+.spin{transform-origin:8px 8px;animation:spin 1s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+/* Detail */
+.detail{margin:2px 6px 8px 48px;padding:10px 12px;border-radius:9px;background:var(--surface);border:1px solid var(--line)}
+.detail.root-detail{margin:10px 12px 0}
+.detail .state-line{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--muted)}
+.detail .description{margin-top:6px;white-space:pre-wrap;overflow-wrap:anywhere}
+.detail .actions{display:flex;gap:6px;flex-wrap:wrap;margin-top:10px}
+.detail .hint{margin-top:8px;font-size:12px;color:var(--muted)}
+.detail .op{margin-top:10px}
+details.fold{margin-top:10px;border-top:1px solid var(--line);padding-top:8px}
+details.fold>summary{cursor:pointer;list-style:none;display:flex;align-items:center;gap:6px;font-size:12px;font-weight:600;color:var(--muted);user-select:none}
+details.fold>summary::-webkit-details-marker{display:none}
+details.fold>summary svg{transition:transform .15s}
+details.fold[open]>summary svg{transform:rotate(90deg)}
+details.fold>summary:hover{color:var(--text)}
+.ctx{margin-top:8px}
+.ctx-label{font-size:11px;color:var(--faint);text-transform:uppercase;letter-spacing:.04em;font-weight:600}
+.ctx-text{margin-top:2px;white-space:pre-wrap;overflow-wrap:anywhere;font-size:12.5px}
+.summary{margin-top:8px;padding:8px 10px;border-left:2px solid var(--done);background:var(--bg);border-radius:0 6px 6px 0;white-space:pre-wrap;overflow-wrap:anywhere;font-size:12.5px}
+.summary.prev{border-left-color:var(--line-strong)}
+
+/* Search results */
+.results{padding:6px}
+.result{display:flex;align-items:flex-start;gap:6px;width:100%;padding:6px 8px;border-radius:7px;text-align:left}
+.result:hover{background:var(--hover)}
+.result .path{display:block;font-size:11.5px;color:var(--faint);margin-top:1px;overflow-wrap:anywhere}
+mark{background:var(--warn-soft);color:inherit;border-radius:2px}
+
+/* Empty state */
+.empty{padding:28px 18px;text-align:center}
+.empty .art{width:44px;height:44px;margin:0 auto 12px;border-radius:12px;display:flex;align-items:center;justify-content:center;background:var(--done-soft);color:var(--done)}
+.empty h1{font-size:15px;font-weight:600}
+.empty p{margin-top:6px;color:var(--muted);max-width:360px;margin-left:auto;margin-right:auto}
+.empty code{font:inherit;color:var(--text);background:var(--surface);padding:1px 5px;border-radius:4px}
+.empty .actions{display:flex;justify-content:center;gap:8px;margin-top:14px;flex-wrap:wrap}
+.tree-list{margin:20px auto 0;max-width:420px;text-align:left}
+.tree-list h2{font-size:11px;font-weight:600;color:var(--faint);text-transform:uppercase;letter-spacing:.05em;padding:0 8px 4px}
+.muted-line{padding:8px 14px;color:var(--muted);font-size:12.5px}
+
+/* Menus */
+.menu{position:fixed;z-index:30;min-width:220px;max-width:min(360px,calc(100vw - 16px));max-height:min(420px,calc(100vh - 16px));overflow:auto;padding:4px;border-radius:10px;background:var(--raised);border:1px solid var(--line-strong);box-shadow:0 10px 30px rgba(0,0,0,.25)}
+.menu[hidden]{display:none}
+.menu-item{display:flex;align-items:center;gap:8px;width:100%;padding:6px 8px;border-radius:6px;text-align:left;font-size:12.5px}
+.menu-item:hover,.menu-item:focus-visible{background:var(--hover);outline:none}
+.menu-item.danger{color:var(--danger)}
+.menu-item .label{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.menu-item .meta{font-size:11.5px;color:var(--faint);font-variant-numeric:tabular-nums}
+.menu-item.active .label{font-weight:600}
+.menu-sep{height:1px;background:var(--line);margin:4px 2px}
+.menu-head{padding:6px 8px 4px;font-size:11px;font-weight:600;color:var(--faint);text-transform:uppercase;letter-spacing:.05em}
+.ring{flex:none}
+
+/* Toast and dialogs */
+#feedback{position:fixed;left:50%;bottom:12px;transform:translateX(-50%);z-index:40;width:max-content;max-width:calc(100% - 24px);padding:8px 8px 8px 12px;border-radius:10px;background:var(--text);color:var(--bg);font-size:12.5px;box-shadow:0 8px 24px rgba(0,0,0,.25)}
+#feedback[hidden]{display:none}
+#feedback.error{background:var(--danger);color:#fff}
+.feedback-head{display:flex;align-items:center;gap:10px}
+.feedback-head .icon-btn{color:inherit;width:22px;height:22px;opacity:.75}
+.feedback-links{display:flex;gap:6px;flex-wrap:wrap;margin-top:6px}
+.feedback-links button{padding:2px 8px;border-radius:5px;border:1px solid currentColor;font-size:12px}
+dialog{border:1px solid var(--line-strong);border-radius:12px;background:var(--raised);color:var(--text);padding:18px;width:min(480px,calc(100% - 24px));max-height:calc(100dvh - 24px);overflow:auto;box-shadow:0 20px 50px rgba(0,0,0,.35)}
+dialog::backdrop{background:rgba(0,0,0,.4)}
+dialog h2{font-size:15px;font-weight:600}
+dialog .lead{margin-top:6px;color:var(--muted);font-size:12.5px;white-space:pre-wrap}
+.form-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:16px}
+.loading{padding:28px;text-align:center;color:var(--muted)}
+@media (max-width:420px){.detail{margin-left:24px}.children{margin-left:12px}:root{--indent:13px}}
+@media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+</style>
+<body>
+<div id="app"><p class="loading" role="status">Loading Chat Tree…</p></div>
+<div id="menu" class="menu" role="menu" hidden></div>
+<div id="feedback" role="status" aria-live="polite" hidden></div>
+<dialog id="confirm" aria-labelledby="confirm-title"><h2 id="confirm-title"></h2><p id="confirm-copy" class="lead"></p><div class="form-actions"><button class="btn ghost" id="cancel-confirm">Cancel</button><button class="btn primary" id="accept-confirm">Continue</button></div></dialog>
+<script>
+const app=document.getElementById('app'),feedback=document.getElementById('feedback'),confirmation=document.getElementById('confirm'),menu=document.getElementById('menu');
+let data=null,focus=null,selected=null,query='',searchOpen=false,rootInfo=false,expanded=new Set(),pending=new Map(),sequence=0,confirmAction=null,busy=false,refreshing=false,connected=false,needsRender=false,disclosures=new Map(),displayMode='inline',starting=new Set(),scope=null;
+
+/* ---------- DOM helpers ---------- */
+function el(tag,attrs={},children=[]){const node=document.createElement(tag);for(const[k,v]of Object.entries(attrs)){if(k==='class')node.className=v;else if(k==='text')node.textContent=v;else if(k==='html')node.innerHTML=v;else if(k.startsWith('on'))node.addEventListener(k.slice(2),v);else if(k.startsWith('aria-')&&typeof v==='boolean')node.setAttribute(k,String(v));else if(v!==undefined&&v!==null&&v!==false)node.setAttribute(k,v===true?'':v)}for(const child of [].concat(children))if(child!=null&&child!==false)node.append(typeof child==='string'?document.createTextNode(child):child);return node}
+function button(label,onclick,cls='btn',attrs={}){return el('button',{type:'button',class:cls,onclick,...attrs},label)}
+const ICONS={
+  chevron:'<path d="M6 4l4 4-4 4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>',
+  down:'<path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>',
+  tree:'<path d="M4 3v10M4 6h4.5M4 11h4.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><circle cx="11" cy="6" r="1.9" fill="currentColor"/><circle cx="11" cy="11" r="1.9" fill="none" stroke="currentColor" stroke-width="1.4"/>',
+  search:'<circle cx="7" cy="7" r="4.25" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M10.2 10.2L13.5 13.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>',
+  info:'<circle cx="8" cy="8" r="6" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M8 7.3v3.7" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><circle cx="8" cy="5.1" r=".9" fill="currentColor"/>',
+  refresh:'<path d="M13 8a5 5 0 1 1-1.5-3.55M13 3v2.6h-2.6" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>',
+  panel:'<rect x="2.5" y="3" width="11" height="10" rx="2" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M9.5 3v10" stroke="currentColor" stroke-width="1.4"/>',
+  inline:'<rect x="2.5" y="4.5" width="11" height="7" rx="2" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M5 2.5h6M5 13.5h6" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>',
+  chat:'<path d="M3 4.5A2 2 0 0 1 5 2.5h6a2 2 0 0 1 2 2v4a2 2 0 0 1-2 2H7.5L4.5 13v-2.6A2 2 0 0 1 3 8.5z" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/>',
+  arrow:'<path d="M5.5 10.5l5-5M6.5 5.5h4v4" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>',
+  close:'<path d="M4.5 4.5l7 7M11.5 4.5l-7 7" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>',
+  dot:'<circle cx="8" cy="8" r="2" fill="currentColor"/>',
+  play:'<path d="M5.5 4v8l6-4z" fill="currentColor"/>',
+  up:'<path d="M6.5 3.5L3.5 6.5l3 3M4 6.5h5.5a3 3 0 0 1 3 3v3" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>'};
+function icon(name,size=16,cls=''){return el('span',{class:cls,'aria-hidden':'true',html:'<svg width="'+size+'" height="'+size+'" viewBox="0 0 16 16">'+ICONS[name]+'</svg>'})}
+
+/* ---------- Host bridge ---------- */
+function request(method,params){const id=++sequence;return new Promise((resolve,reject)=>{pending.set(id,{resolve,reject});window.parent.postMessage({jsonrpc:'2.0',id,method,params},'*');setTimeout(()=>{if(pending.has(id)){pending.delete(id);reject({message:'Codex did not respond. Refresh the panel and check that the plugin is enabled.'})}},method==='tools/call'&&params.name==='tree_create_saved_chat'?240000:20000)})}
+async function tool(name,args={}){const r=await request('tools/call',{name,arguments:args});if(r?.isError||r?.structuredContent?.error)throw r.structuredContent?.error||{message:'Operation failed'};return r.structuredContent}
+function notify(message,error=null){const head=el('div',{class:'feedback-head'},[el('span',{text:message}),button(icon('close',14),()=>feedback.hidden=true,'icon-btn',{'aria-label':'Dismiss notification'})]);feedback.replaceChildren(head);const links=el('div',{class:'feedback-links'});for(const c of error?.chats||[])links.append(button('Open “'+c.title+'”',()=>openChat(c.chat_id),''));if(error?.node_id&&data?.nodes?.some(n=>n.id===error.node_id))links.append(button('Show parent item',()=>{feedback.hidden=true;select(error.node_id)},''));if(links.children.length)feedback.append(links);feedback.classList.toggle('error',!!error);feedback.hidden=false;clearTimeout(notify.timer);if(!error)notify.timer=setTimeout(()=>feedback.hidden=true,4500)}
+async function action(fn){if(busy)return;busy=true;document.querySelectorAll('.btn.primary').forEach(b=>b.disabled=true);try{await fn()}catch(error){notify(error.message||String(error),error)}finally{busy=false;document.querySelectorAll('.btn.primary').forEach(b=>b.disabled=false)}}
+async function setDisplayMode(mode){const r=await request('ui/request-display-mode',{mode});if(!r?.mode)throw{message:'Codex did not confirm a display mode. Reopen the component and try again.'};applyTheme({displayMode:r.mode});if(r.mode!==mode)throw{message:mode==='inline'?'Codex kept this component in the panel. Inline display is not available in this view.':'Codex kept this component in the chat. Panel display is not available in this view.'}}
+function openChat(chatId){return action(()=>request('ui/open-link',{url:'codex://threads/'+chatId}))}
+
+/* ---------- Graph helpers ---------- */
+const byId=id=>data?.nodes?.find(n=>n.id===id);
+function ancestors(n){const chain=[];while(n){chain.unshift(n);n=byId(n.parent_id)}return chain}
+function children(n){return data.nodes.filter(x=>x.parent_id===n.id)}
+function descendants(n){return data.nodes.filter(x=>x.id!==n.id&&ancestors(x).some(a=>a.id===n.id))}
+function status(n){if(n.locked_by||starting.has(n.id))return'busy';if(n.stale)return'stale';if(n.state==='done')return'done';if(!n.chat_id)return'new';const r=n.runtime?.state;return r==='running'||r==='service'?'working':'ready'}
+const STATUS_TEXT={new:'Not started',ready:'Chat ready',working:'Agent working',done:'Completed',stale:'Context changed',busy:'Operation in progress'};
+function stateText(n){return starting.has(n.id)?'Creating chat…':STATUS_TEXT[status(n)]}
+function isCurrent(n){return n.id===data.current_node_id}
+function canStart(n){const p=byId(n.parent_id);return !n.chat_id&&!!p?.chat_id}
+/* The panel opens on the current chat's own item; the whole tree is one toggle away. */
+function ownNode(){const n=byId(data.current_node_id);return n?.parent_id?n:null}
+function scopeNode(){return byId(scope)||data.root}
+function inScope(n){return ancestors(n).some(a=>a.id===scopeNode().id)}
+function statusIcon(s,size=16){const svg={
+  new:'<circle cx="8" cy="8" r="6" fill="none" stroke="currentColor" stroke-width="1.4" stroke-dasharray="2.2 2.2"/>',
+  ready:'<circle cx="8" cy="8" r="6" fill="none" stroke="currentColor" stroke-width="1.4"/>',
+  working:'<circle cx="8" cy="8" r="6" fill="none" stroke="currentColor" stroke-opacity=".25" stroke-width="1.6"/><path class="spin" d="M8 2a6 6 0 0 1 6 6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>',
+  busy:'<circle cx="8" cy="8" r="6" fill="none" stroke="currentColor" stroke-opacity=".25" stroke-width="1.6"/><path class="spin" d="M8 2a6 6 0 0 1 6 6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>',
+  done:'<circle cx="8" cy="8" r="7" fill="currentColor"/><path d="M5 8.2l2 2 4-4.4" fill="none" stroke="var(--bg)" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>',
+  stale:'<circle cx="8" cy="8" r="6" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M8 4.8v3.6" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><circle cx="8" cy="10.9" r=".95" fill="currentColor"/>'}[s];
+  return el('span',{class:'status '+s,'aria-hidden':'true',html:'<svg width="'+size+'" height="'+size+'" viewBox="0 0 16 16">'+svg+'</svg>'})}
+function ring(done,total,size=16){const r=6,c=2*Math.PI*r,p=total?done/total:0;return el('span',{class:'ring','aria-hidden':'true',html:'<svg width="'+size+'" height="'+size+'" viewBox="0 0 16 16"><circle cx="8" cy="8" r="'+r+'" fill="none" stroke="var(--line-strong)" stroke-width="2"/><circle cx="8" cy="8" r="'+r+'" fill="none" stroke="var(--done)" stroke-width="2" stroke-linecap="round" stroke-dasharray="'+(c*p)+' '+c+'" transform="rotate(-90 8 8)"/></svg>'})}
+function tally(list){const t={total:list.length,done:0,working:0,stale:0};for(const n of list){const s=status(n);if(s==='done')t.done++;else if(s==='working'||s==='busy')t.working++;else if(s==='stale')t.stale++}return t}
+
+/* ---------- Selection and data ---------- */
+function reveal(id){for(const a of ancestors(byId(id)).slice(0,-1))expanded.add(a.id)}
+function select(id,{toggle=false}={}){const n=byId(id);if(!n)return;if(!inScope(n)){scope=data.root.id;rootInfo=false}if(id===scope){selected=null;if(!n.parent_id)rootInfo=true}else{selected=toggle&&selected===id?null:id;reveal(id)}query='';searchOpen=false;render();requestAnimationFrame(()=>document.querySelector('.row[data-id="'+CSS.escape(id)+'"]')?.scrollIntoView({block:'nearest'}));request('ui/update-model-context',{content:[{type:'text',text:JSON.stringify({selected_node_id:id,root_id:data.root?.id})}]}).catch(()=>{})}
+async function readSelection(){try{return await tool('tree_read',focus?{focus_id:focus}:{})}catch(error){if(error.code!=='not_found'||!focus)throw error;focus=data?.root?.id===focus?null:data?.root?.id||null;return tool('tree_read',focus?{focus_id:focus}:{})}}
+function adopt(next){const firstTree=!data||data.root?.id!==next.root?.id;data=next;if(!focus||!data.nodes.some(n=>n.id===focus))focus=data.focus_id;if(selected&&!byId(selected))selected=null;if(firstTree&&data.nodes.length){selected=null;rootInfo=false;scope=ownNode()?.id||data.root.id}if(data.nodes.length&&!byId(scope))scope=ownNode()?.id||data.root.id}
+async function refresh(){if(!connected||refreshing)return;refreshing=true;try{const next=await readSelection();const changed=JSON.stringify(data)!==JSON.stringify(next);adopt(next);needsRender=needsRender||changed;if(needsRender&&!interacting())render()}catch(error){notify(error.message||String(error),error)}finally{refreshing=false}}
+function interacting(){return document.activeElement?.matches('input,textarea')||!menu.hidden||confirmation.open}
+async function selectRoot(id){closeMenu();await action(async()=>{const next=await tool('tree_read',{root_id:id});focus=id;query='';searchOpen=false;adopt(next);render()})}
+
+/* ---------- Operations ---------- */
+async function perform(change){const r=await tool('tree_ui',{change,expected_revision:data?.revision??undefined});await followResult(r);await refresh();return r}
+async function followResult(r){if(r.operation){if(r.operation.kind==='start'){const id=r.operation.node_id;starting.add(id);render();notify('Creating the chat…');try{const created=await tool('tree_create_saved_chat',{operation_id:r.operation.id,token:r.operation.token,node_id:id});await request('ui/open-link',{url:created.url});notify('Chat ready. Its first message receives this item’s context.')}finally{starting.delete(id)}}else{await dispatch(r.operation);notify('Request sent to the agent. Operation state saved.')}}else if(r.url){await request('ui/open-link',{url:r.url})}else notify('Changes saved')}
+async function dispatch(op){if(data.current_node_id&&byId(data.current_node_id)?.chat_id!==op.payload.actor_chat){notify('Continue this operation in the chat where it started.',{chats:[{title:'Initiating chat',chat_id:op.payload.actor_chat}]});return}await request('ui/message',{role:'user',content:[{type:'text',text:op.dispatch_prompt}]})}
+function confirm(title,copy,fn,{label='Continue'}={}){document.getElementById('confirm-title').textContent=title;document.getElementById('confirm-copy').textContent=copy;document.getElementById('accept-confirm').textContent=label;confirmAction=fn;confirmation.showModal()}
+function start(n){return action(()=>perform({action:'start',node_id:n.id}))}
+function complete(n){const nested=descendants(n).filter(x=>x.chat_id).length;confirm('Complete “'+n.title+'”?',(nested?'The agent will collect fresh summaries from '+nested+' nested chat'+(nested>1?'s':'')+' and ':'The agent will write a summary and ')+(n.parent_id?'deliver it to the parent chat.':'save it as the tree result.')+' Only this item is marked complete; its chat stays available.',()=>perform({action:'finish',node_id:n.id}),{label:'Complete'})}
+function reopen(n){return action(()=>perform({action:'reopen',node_id:n.id}))}
+function toggleCheck(n){if(n.state==='done')return reopen(n);if(!n.chat_id)return notify(canStart(n)?'Start this item’s chat before completing it.':'Start the parent chat first.');complete(n)}
+
+/* ---------- Menus ---------- */
+let menuOwner=null;
+function openMenu(anchor,items){if(menuOwner===anchor&&!menu.hidden){closeMenu();return}closeMenu();menuOwner=anchor;anchor.setAttribute('aria-expanded','true');menu.replaceChildren(...items);menu.hidden=false;const a=anchor.getBoundingClientRect(),m=menu.getBoundingClientRect();let left=Math.min(a.left,innerWidth-m.width-8),top=a.bottom+4;if(top+m.height>innerHeight-8)top=Math.max(8,a.top-m.height-4);menu.style.left=Math.max(8,left)+'px';menu.style.top=top+'px';menu.querySelector('.menu-item')?.focus()}
+function closeMenu(){if(menuOwner)menuOwner.setAttribute('aria-expanded','false');menuOwner=null;menu.hidden=true;if(needsRender&&!interacting())render()}
+function menuItem(content,onclick,cls=''){return button(content,()=>{closeMenu();onclick()},'menu-item '+cls,{role:'menuitem'})}
+function treeMenu(anchor){const items=[el('div',{class:'menu-head',text:'Chat Trees'})];for(const r of data.roots){const active=r.id===data.root?.id;items.push(menuItem([r.items!==undefined?ring(r.done,r.items):icon('tree',16),el('span',{class:'label',text:r.title}),r.id===data.current_root_id?el('span',{class:'pill here',text:'This chat'}):null,r.items!==undefined?el('span',{class:'meta',text:r.done+'/'+r.items}):null],()=>active?null:selectRoot(r.id),active?'active':''))}openMenu(anchor,items)}
+/* ---------- Rendering ---------- */
+function disclosure(key,title,defaultOpen=false){const node=el('details',{class:'fold',open:(disclosures.get(key)??defaultOpen)||undefined},[el('summary',{},[icon('chevron',12),title])]);node.addEventListener('toggle',()=>{if(node.isConnected)disclosures.set(key,node.open)});return node}
+function header(){return scopeNode().parent_id?focusHeader(scopeNode()):rootHeader()}
+function treeToggle(){const own=ownNode();if(!own)return null;const whole=scope!==own.id;return button(icon('tree'),()=>{scope=whole?own.id:data.root.id;selected=null;rootInfo=false;if(!whole)reveal(own.id);render()},'icon-btn',{'aria-label':whole?'Back to this chat':'Show the whole tree','aria-pressed':whole,title:whole?'Back to this chat':'Whole tree'})}
+function toolbar(){return el('div',{class:'tools'},[
+    scopeNode().parent_id?null:button(icon('info'),()=>{rootInfo=!rootInfo;render()},'icon-btn',{'aria-label':'Tree details','aria-pressed':rootInfo,title:'Tree details'}),
+    button(icon('search'),()=>{searchOpen=!searchOpen;if(!searchOpen)query='';render();if(searchOpen)document.querySelector('.search input')?.focus()},'icon-btn',{'aria-label':'Search branches','aria-pressed':searchOpen,title:'Search the tree'}),
+    button(icon('refresh'),()=>action(async()=>{needsRender=true;await refresh()}),'icon-btn',{'aria-label':'Refresh tree',title:'Refresh tree'}),
+    treeToggle(),
+    displayModeButton()])}
+function progressLine(list){const t=tally(list),seg=el('div',{class:'segments'+(list.length>24?' solid':''),'aria-hidden':'true'});
+  if(list.length>24){const add=(cls,count)=>{if(count)seg.append(el('span',{class:cls,style:'flex:'+count}))};add('done',t.done);add('working',t.working);add('stale',t.stale);add('',t.total-t.done-t.working-t.stale)}else for(const n of list){const s=status(n);seg.append(el('span',{class:s==='busy'?'working':s}))}
+  const parts=[el('b',{text:String(t.done)}),' of '+t.total+' done'];if(t.working)parts.push(' · '+t.working+' working');if(t.stale)parts.push(' · '+t.stale+' changed');
+  return el('div',{class:'progress',role:'progressbar','aria-label':'Completed items','aria-valuenow':t.done,'aria-valuemin':0,'aria-valuemax':Math.max(1,t.total)},[seg,el('span',{class:'progress-text'},parts)])}
+function searchField(){const field=el('input',{type:'search',placeholder:'Find an item in this tree…','aria-label':'Search tree',oninput:e=>{query=e.target.value;renderBody()},onkeydown:e=>{if(e.key==='Escape'){searchOpen=false;query='';render()}}});field.value=query;return el('label',{class:'search'},[icon('search',14),field])}
+function rootHeader(){const h=el('header');
+  const sw=button([icon('tree',16,'tree-icon'),el('h1',{text:data.root.title}),icon('down',14,'chev')],e=>treeMenu(e.currentTarget),'switcher',{'aria-haspopup':'menu','aria-expanded':'false',title:'Switch Chat Tree'});
+  h.append(el('div',{class:'bar'},[sw,toolbar()]),progressLine(children(data.root)));if(searchOpen)h.append(searchField());return h}
+function focusHeader(n){const h=el('header',{class:'focus'}),p=byId(n.parent_id),siblings=children(p),index=siblings.findIndex(x=>x.id===n.id);
+  const path=ancestors(p).map(a=>a.title).join(' › ');
+  const up=button([icon('up',14),el('span',{class:'label',text:p.title})],()=>p.chat_id?openChat(p.chat_id):select(p.id),'parent-link',{title:'Open parent chat · '+path,'aria-label':'Open parent chat: '+p.title});
+  h.append(el('div',{class:'bar'},[up,el('span',{class:'crumb-meta',text:'Item '+(index+1)+' of '+siblings.length+' · '+tally(siblings).done+' done'}),toolbar()]));
+  const s=status(n),title=el('div',{class:'focus-title'},[checkButton(n,18),el('h1',{text:n.title})]);
+  if(s==='working'||s==='stale'||s==='busy')title.append(el('span',{class:'pill '+(s==='stale'?'stale':'working'),text:stateText(n)}));
+  h.append(title);if(searchOpen)h.append(searchField());return h}
+function displayModeButton(){const mode=displayMode==='fullscreen'?'inline':'fullscreen',label=mode==='inline'?'Show in chat':'Open in panel';return button(icon(mode==='inline'?'inline':'panel'),()=>action(()=>setDisplayMode(mode)),'icon-btn',{'aria-label':label,title:label})}
+function banners(){const stack=el('div',{class:'stack'});
+  if(data.current_root_id&&data.current_root_id!==data.root.id)stack.append(el('div',{class:'banner'},[el('span',{class:'grow',text:'You are browsing another tree. This chat belongs to a different one.'}),button('Back to this chat’s tree',()=>selectRoot(data.current_root_id),'btn')]));
+  const relevant=id=>{const n=byId(id);return scopeNode().parent_id?!!n&&inScope(n):true};
+  for(const op of data.operations.filter(o=>relevant(o.node_id))){const n=byId(op.node_id);const title={start:'Creating chat',finish:'Completing',delete:'Deleting',rebuild:'Rebuilding'}[op.kind]||op.kind;const stage={requested:'waiting for the agent',creating:'creating chat',collecting:'collecting summaries',preparing:'preparing replacements',deleting:'deleting old chats'}[op.stage]||op.stage;const b=el('div',{class:'banner work'},[statusIcon('working'),el('span',{class:'grow'},[el('strong',{text:title+(n?' “'+n.title+'”':'')}),' · '+stage,...(op.error?[el('div',{class:'small',text:op.error})]:[])]),button('Continue',()=>action(()=>dispatch(op)),'btn')]);if(!op.payload.creations&&!op.payload.replacement_ids.length&&!op.payload.completed.length)b.append(button('Cancel',()=>action(async()=>{await tool('tree_ui',{operation_id:op.id,token:op.token,step:'cancel'});await refresh()}),'btn ghost'));stack.append(b)}
+  for(const p of data.proposals.filter(p=>relevant(p.payload.node_id||p.payload.parent_id)))stack.append(proposalCard(p));
+  return stack.children.length?stack:null}
+function proposalCard(p){const change=p.payload,label={create:'Create a Chat Tree',add:'Add items',edit:'Edit branch',move:'Move branch',start:'Open branch',finish:'Complete branch',reopen:'Reopen item',delete:'Delete branch',rebuild:'Rebuild branch'}[change.action]||'Change';const target=byId(change.node_id||change.parent_id);
+  const card=el('section',{class:'proposal'},[el('div',{class:'kicker',text:'Agent proposal'}),el('h2',{text:label+(target?' · '+target.title:change.title?' · '+change.title:'')})]);
+  for(const[k,title]of[['title','Title'],['description','Description'],['context','Item context'],['common_context','Shared context']])if(change[k]!==undefined&&!(change.action==='create'&&k==='title'))card.append(el('p',{class:'field'},[el('span',{text:title+': '}),change[k]]));
+  if(change.items?.length){const ul=el('ul');for(const item of change.items)ul.append(el('li',{},[statusIcon('new',14),el('div',{},[el('div',{text:item.title}),item.description?el('div',{class:'progress-text',text:item.description}):null])]));card.append(ul)}
+  if(change.action==='move'){const dst=byId(change.destination_id);card.append(el('p',{class:'field'},[el('span',{text:'Move to: '}),dst?.title||'Selected branch']))}
+  if(['delete','rebuild'].includes(change.action))card.append(el('p',{class:'note',text:'Approval includes permanently deleting the old chats in this branch.'}));
+  card.append(el('div',{class:'card-actions'},[button('Approve',()=>action(async()=>{const r=await tool('tree_ui',{proposal_id:p.id});await followResult(r);await refresh()}),'btn primary'),button('Dismiss',()=>action(async()=>{await tool('tree_ui',{dismiss_proposal:p.id});await refresh()}),'btn ghost')]));return card}
+function checkButton(n,size=16){const b=button(statusIcon(status(n),size),()=>toggleCheck(n),'check',{role:'checkbox','aria-checked':n.state==='done','aria-label':(n.state==='done'?'Reopen ':'Complete ')+n.title,title:stateText(n)+(n.state==='done'?' · click to reopen':n.chat_id?' · click to complete':''),tabindex:'-1'});if(n.locked_by||starting.has(n.id))b.disabled=true;return b}
+function row(n){const kids=children(n),open=expanded.has(n.id),s=status(n),t=tally(kids);
+  const r=el('div',{class:'row'+(selected===n.id?' selected':'')+(isCurrent(n)?' current':'')+(s==='done'?' done':''),'data-id':n.id,role:'treeitem','aria-level':ancestors(n).length-1,'aria-selected':selected===n.id,'aria-expanded':kids.length?open:undefined});
+  r.append(button(icon('chevron',12),()=>{open?expanded.delete(n.id):expanded.add(n.id);render()},'twisty',{'aria-label':(open?'Collapse ':'Expand ')+n.title,'aria-expanded':open,disabled:!kids.length||undefined,tabindex:'-1'}));
+  r.append(checkButton(n));
+  r.append(button([el('span',{class:'text',text:n.title}),kids.length?el('span',{class:'count',text:t.done+'/'+t.total}):null],()=>select(n.id,{toggle:true}),'title',{'aria-label':n.title+', '+stateText(n)}));
+  const end=el('div',{class:'row-end'});
+  if(isCurrent(n))end.append(el('span',{class:'pill here',text:'This chat'}));
+  else if(s==='working')end.append(el('span',{class:'pill working',text:'Working'}));
+  else if(s==='stale')end.append(el('span',{class:'pill stale',text:'Changed'}));
+  else if(kids.length&&!open){const active=descendants(n).filter(x=>status(x)==='working'||status(x)==='busy').length;if(active)end.append(el('span',{class:'pill working',text:active+' working inside'}))}
+  if(n.chat_id&&!isCurrent(n))end.append(button([icon('arrow',14)],()=>openChat(n.chat_id),'chat-btn reveal',{'aria-label':'Open chat: '+n.title,title:'Open chat',tabindex:'-1'}));
+  else if(canStart(n)&&!starting.has(n.id)&&!n.locked_by)end.append(button([icon('play',10),'Start'],()=>start(n),'chat-btn start reveal',{'aria-label':'Start chat: '+n.title,title:'Create this item’s chat',tabindex:'-1'}));
+  r.append(end);return r}
+function branch(n,container){for(const child of children(n)){container.append(row(child));if(selected===child.id)container.append(detail(child));if(expanded.has(child.id)&&children(child).length){const box=el('div',{class:'children',role:'group'});branch(child,box);container.append(box)}}}
+function detail(n,{focus=false}={}){const s=status(n),box=el('div',{class:focus?'detail focus-detail':n.parent_id?'detail':'detail root-detail'}),kids=children(n);
+  if(!focus){const line=el('div',{class:'state-line'},[statusIcon(s,14),el('span',{text:stateText(n)})]);if(isCurrent(n))line.append(el('span',{text:'· this chat'}));if(kids.length)line.append(el('span',{text:'· '+tally(kids).done+' of '+kids.length+' items done'}));box.append(line)}
+  if(n.description)box.append(el('p',{class:'description',text:n.description}));
+  if(n.stale)box.append(el('p',{class:'hint',text:'The parent context changed. Review this branch against the updated task, then complete, rebuild or delete it.'}));
+  if(starting.has(n.id))box.append(el('p',{class:'hint',text:'Creating the chat with the parent chat’s settings…'}));
+  if(!n.chat_id&&n.parent_id&&!canStart(n))box.append(el('p',{class:'hint',text:'Start the parent item’s chat first — new chats inherit its settings.'}));
+  const acts=el('div',{class:'actions'});
+  if(n.chat_id&&!isCurrent(n))acts.append(button([icon('chat',14),'Open chat'],()=>openChat(n.chat_id),'btn primary'));
+  else if(canStart(n))acts.append(button([icon('play',10),starting.has(n.id)?'Creating…':'Start chat'],()=>start(n),'btn primary',{disabled:starting.has(n.id)||!!n.locked_by||undefined}));
+  if(n.state==='done')acts.append(button('Reopen',()=>reopen(n),'btn'));else if(n.chat_id)acts.append(button(n.parent_id?'Complete':'Complete tree',()=>complete(n),'btn',{disabled:!!n.locked_by||undefined}));
+  if(acts.children.length)box.append(acts);
+  if(n.summary)box.append(el('div',{class:'summary'+(n.state==='done'?'':' prev'),text:n.summary}));
+  if(n.results?.length){const res=disclosure(n.id+':results','Saved results · '+n.results.length);for(const r of n.results)res.append(el('div',{class:'ctx'},[el('div',{class:'ctx-label',text:r.source_title}),el('div',{class:'ctx-text',text:r.summary})]));box.append(res)}
+  const ctx=disclosure(n.id+':context','Context and decisions');for(const c of ancestors(n)){const own=c.id===n.id;if(c.common_context&&!own)ctx.append(el('div',{class:'ctx'},[el('div',{class:'ctx-label',text:'Shared · '+c.title}),el('div',{class:'ctx-text',text:c.common_context})]));if(c.context)ctx.append(el('div',{class:'ctx'},[el('div',{class:'ctx-label',text:own?'This item':'Item · '+c.title}),el('div',{class:'ctx-text',text:c.context})]))}if(n.common_context)ctx.append(el('div',{class:'ctx'},[el('div',{class:'ctx-label',text:'Shared with nested items'}),el('div',{class:'ctx-text',text:n.common_context})]));if(ctx.children.length===1)ctx.append(el('p',{class:'ctx-text',style:'margin-top:8px;color:var(--muted)',text:'No context added yet.'}));box.append(ctx);
+  return box}
+function highlight(textValue){const i=textValue.toLocaleLowerCase().indexOf(query.toLocaleLowerCase());if(!query||i<0)return[textValue];return[textValue.slice(0,i),el('mark',{text:textValue.slice(i,i+query.length)}),textValue.slice(i+query.length)]}
+function renderResults(main){const q=query.toLocaleLowerCase(),matches=data.nodes.filter(n=>(n.title+' '+n.description).toLocaleLowerCase().includes(q));const list=el('div',{class:'results'});if(!matches.length)list.append(el('p',{class:'muted-line',text:'Nothing matches “'+query+'”.'}));for(const n of matches)list.append(button([statusIcon(status(n)),el('span',{},[el('span',{},highlight(n.title)),el('span',{class:'path',text:ancestors(n).slice(0,-1).map(x=>x.title).join(' › ')||'Tree root'})])],()=>select(n.id),'result'));main.append(list)}
+function renderBody(){const body=document.getElementById('body');if(!body)return;body.replaceChildren();if(query){renderResults(body);return}
+  const s=scopeNode();if(s.parent_id){const kids=children(s),t=tally(kids);body.append(detail(s,{focus:true}));if(!kids.length)return;body.append(el('div',{class:'section-head'},[el('h2',{text:'Checklist of this chat'}),el('span',{class:'progress-text',text:t.done+' of '+t.total+' done'+(t.working?' · '+t.working+' working':'')+(t.stale?' · '+t.stale+' changed':'')})]))}else if(rootInfo)body.append(detail(s));
+  const outline=el('div',{class:'outline',role:'tree','aria-label':'Checklist for '+s.title,onkeydown:keyNav});branch(s,outline);
+  if(!children(s).length)outline.append(el('p',{class:'muted-line',text:'No items yet. Ask the agent to break the plan down.'}));
+  body.append(outline)}
+function render(){needsRender=false;closeMenuSilently();app.replaceChildren();if(!data){app.append(el('p',{class:'loading',text:'Loading Chat Tree…'}));return}
+  if(!data.nodes.length){renderEmpty();return}
+  app.append(header());const b=banners();if(b)app.append(b);app.append(el('div',{id:'body'}));renderBody()}
+function closeMenuSilently(){if(!menu.hidden){if(menuOwner)menuOwner.setAttribute('aria-expanded','false');menuOwner=null;menu.hidden=true}}
+function renderEmpty(){const box=el('main',{class:'empty'},[el('div',{class:'art'},icon('tree',24)),el('h1',{text:'No Chat Tree in this chat'}),el('p',{},['Ask the agent: ',el('code',{text:'Create a Chat Tree from our plan.'}),' Each checklist item becomes its own chat.'])]);
+  const stack=el('div',{class:'stack',style:'text-align:left;padding:16px 0 0'});for(const p of data.proposals)stack.append(proposalCard(p));if(stack.children.length)box.append(stack);
+  if(data.roots.length){const list=el('div',{class:'tree-list'},[el('h2',{text:'Other trees'})]);for(const r of data.roots)list.append(button([r.items!==undefined?ring(r.done,r.items):icon('tree'),el('span',{class:'label',text:r.title}),r.items!==undefined?el('span',{class:'meta',text:r.done+'/'+r.items}):null],()=>selectRoot(r.id),'menu-item'));box.append(list)}
+  app.append(box)}
+function keyNav(e){const rows=[...document.querySelectorAll('.outline .row .title')],i=rows.indexOf(document.activeElement);if(i<0)return;const id=rows[i].closest('.row').dataset.id,n=byId(id);
+  if(e.key==='ArrowDown'||e.key==='ArrowUp'){e.preventDefault();rows[Math.max(0,Math.min(rows.length-1,i+(e.key==='ArrowDown'?1:-1)))].focus()}
+  else if(e.key==='ArrowRight'&&children(n).length&&!expanded.has(id)){e.preventDefault();expanded.add(id);render();focusRow(id)}
+  else if(e.key==='ArrowLeft'){e.preventDefault();if(expanded.has(id)){expanded.delete(id);render();focusRow(id)}else if(byId(n.parent_id)?.parent_id)focusRow(n.parent_id)}}
+function focusRow(id){document.querySelector('.row[data-id="'+CSS.escape(id)+'"] .title')?.focus()}
+
+/* ---------- Wiring ---------- */
+document.getElementById('cancel-confirm').onclick=()=>confirmation.close();document.getElementById('accept-confirm').onclick=()=>{const fn=confirmAction;confirmation.close();action(fn)};
+document.addEventListener('pointerdown',e=>{if(!menu.hidden&&!menu.contains(e.target)&&!menuOwner?.contains(e.target))closeMenu()});
+document.addEventListener('keydown',e=>{if(e.key==='Escape'&&!menu.hidden){closeMenu()}});
+window.addEventListener('resize',()=>{if(!menu.hidden)closeMenu()});
+window.addEventListener('message',event=>{if(event.source!==window.parent||event.data?.jsonrpc!=='2.0')return;const m=event.data;if(m.id!==undefined&&pending.has(m.id)){const p=pending.get(m.id);pending.delete(m.id);m.error?p.reject(m.error):p.resolve(m.result);return}if(m.method==='ui/notifications/tool-result'&&m.params?.structuredContent?.nodes){adopt(m.params.structuredContent);if(data.root)focus=focus||data.focus_id;render()}if(m.method==='ui/notifications/host-context-changed')applyTheme(m.params)});
+function applyTheme(context){const changed=!!context?.displayMode&&displayMode!==context.displayMode;if(context?.displayMode)displayMode=context.displayMode;if(context?.theme)document.documentElement.style.colorScheme=context.theme;for(const[k,v]of Object.entries(context?.styles?.variables||{}))if(k.startsWith('--')&&typeof v==='string')document.documentElement.style.setProperty(k,v);if(changed&&data)render()}
+request('ui/initialize',{appInfo:{name:'chat-tree',version:'__VERSION__'},appCapabilities:{},protocolVersion:'2026-01-26'}).then(result=>{applyTheme(result?.hostContext);connected=true;window.parent.postMessage({jsonrpc:'2.0',method:'ui/notifications/initialized'},'*');reportSize();refresh()}).catch(error=>{app.replaceChildren(el('div',{class:'empty'},[el('h1',{text:'Panel disconnected'}),el('p',{text:error.message||String(error)}),el('div',{class:'actions'},[button('Try again',()=>location.reload(),'btn primary')])]))});
+setInterval(()=>{if(!document.hidden&&!busy&&!interacting())refresh()},3500);
+/* Inline hosts size the frame from this report; fullscreen ignores it. */
+let sizeFrame=null,lastHeight=0;function reportSize(){if(sizeFrame)return;sizeFrame=requestAnimationFrame(()=>{sizeFrame=null;const height=Math.ceil(document.documentElement.getBoundingClientRect().height);if(connected&&height!==lastHeight){lastHeight=height;window.parent.postMessage({jsonrpc:'2.0',method:'ui/notifications/size-changed',params:{height}},'*')}})}new ResizeObserver(reportSize).observe(document.documentElement);
+</script>
+</body></html>

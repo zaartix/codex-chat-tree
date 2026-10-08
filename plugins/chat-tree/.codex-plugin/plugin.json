@@ -1,0 +1,26 @@
+{
+  "hooks": "./hooks/hooks.json",
+  "interface": {
+    "displayName": "Chat Tree",
+    "shortDescription": "Task branches, chats, context and results in one panel.",
+    "category": "Productivity",
+    "capabilities": [
+      "Read",
+      "Write"
+    ],
+    "defaultPrompt": [
+      "Create a Chat Tree from our plan.",
+      "Open the Chat Tree for this task."
+    ],
+    "brandColor": "#6baa87",
+    "composerIcon": "./assets/icon.svg",
+    "logo": "./assets/icon.svg",
+    "developerName": "zaartix",
+    "websiteUrl": "https://github.com/zaartix/codex-chat-tree",
+    "longDescription": "Turn an agreed plan into a nested checklist where every item is its own Codex chat. Item chats inherit the settings of their immediate parent, and completing a branch collects summaries bottom-up and hands the result to its parent."
+  },
+  "name": "chat-tree",
+  "version": "0.2.0",
+  "description": "Nested task checklists, shared context and linked Codex chats.",
+  "mcpServers": "./.mcp.json"
+}
