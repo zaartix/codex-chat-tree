@@ -96,16 +96,39 @@ class TreeTests(unittest.TestCase):
         self.bind(self.a,'a-chat')
         asked=[]
         class History:
-            def deleted(inner,chats):
-                asked.append(sorted(chats));return ['a-chat']
+            def inspect(inner,chats):
+                asked.append(sorted(chats));return {'a-chat':None,'root-chat':{'name':'Root','archived':False}}
         dispatcher=Dispatcher(self.store,History())
         actor={'chat_id':'root-chat','turn_id':None,'ui':True}
         nodes=dispatcher.call('tree_read',{},actor)['nodes']
         self.assertEqual({n['id'] for n in nodes},{self.root,self.b});self.assertEqual(asked,[['a-chat','root-chat']])
         dispatcher.call('tree_read',{},actor);self.assertEqual(len(asked),1)
         class Broken:
-            def deleted(inner,chats):raise RuntimeError('Codex CLI not found')
+            def inspect(inner,chats):raise RuntimeError('Codex CLI not found')
         self.assertEqual(len(Dispatcher(self.store,Broken()).call('tree_read',{},actor)['nodes']),2)
+
+    def test_items_are_numbered_by_hierarchy(self):
+        deep=self.change(action='add',parent_id=self.b,items=[{'title':'B1'},{'title':'B2'}])['item_ids']
+        deeper=self.change(action='add',parent_id=deep[1],items=[{'title':'B2a'}])['item_ids'][0]
+        numbers={n['title']:n['number'] for n in self.store.view('root-chat')['nodes']}
+        self.assertEqual(numbers,{'Root':None,'A':'1','B':'2','B1':'2.1','B2':'2.2','B2a':'2.2.1'})
+        self.assertEqual(self.store.chat_title(deeper),'[2.2.1] B2a');self.assertEqual(self.store.chat_title(self.root),'Root')
+        with self.store.connect() as db:self.assertEqual([c['number'] for c in self.store.context(db,deeper)],[None,'2','2.2','2.2.1'])
+
+    def test_chat_names_follow_renumbering_and_keep_user_text(self):
+        self.bind(self.a,'a-chat');self.bind(self.b,'b-chat')
+        renamed={}
+        class History:
+            def inspect(inner,chats):
+                return {'root-chat':{'name':'Plan','archived':False},'a-chat':{'name':'[1] A','archived':False},
+                        'b-chat':{'name':'[2] B, my notes','archived':False}}
+            def rename(inner,names):renamed.update(names)
+        dispatcher=Dispatcher(self.store,History())
+        actor={'chat_id':'root-chat','turn_id':None,'ui':True}
+        dispatcher.call('tree_read',{},actor);self.assertEqual(renamed,{})
+        with self.store.transaction() as db:db.execute('UPDATE nodes SET position=CASE id WHEN ? THEN 1 ELSE 0 END WHERE parent_id=?',(self.a,self.root))
+        dispatcher.reconciled=None;dispatcher.call('tree_read',{},actor)
+        self.assertEqual(renamed,{'a-chat':'[2] A','b-chat':'[1] B, my notes'})
 
     def test_linked_chat_can_browse_another_tree(self):
         other = self.store.apply({'action':'create','title':'Other','items':[{'title':'X'},{'title':'Y'}]}, EVIDENCE, 'other-chat')
@@ -618,12 +641,14 @@ class InheritanceTests(unittest.TestCase):
         def call(identifier,method,params):
             if params['threadId']=='gone':raise RuntimeError('thread not loaded: gone')
             if params['threadId']=='flaky':raise RuntimeError('Codex AppServer timed out during thread/read')
-            return {'thread':{'id':params['threadId']}}
+            path='/x/archived_sessions/r.jsonl' if params['threadId']=='old' else '/x/sessions/r.jsonl'
+            return {'thread':{'id':params['threadId'],'name':'[1] A','path':path}}
         @contextmanager
         def connection():yield call,self.events
         with patch.object(self.history,'connection',connection):
-            self.assertEqual(self.history.deleted(['alive','gone','flaky']),['gone'])
-        self.assertEqual(self.history.deleted([]),[])
+            self.assertEqual(self.history.inspect(['alive','gone','flaky','old']),
+                             {'alive':{'name':'[1] A','archived':False},'gone':None,'old':{'name':'[1] A','archived':True}})
+        self.assertEqual(self.history.inspect([]),{})
 
     def test_fork_inherits_settings_without_parent_history(self):
         result=self.run_create()

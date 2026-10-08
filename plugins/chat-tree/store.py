@@ -140,13 +140,44 @@ class Store:
             ORDER BY b.depth DESC,n.position,n.created''', (node_id,)).fetchall()
         return [dict(r) for r in rows]
 
+    def numbers(self, db, root_id):
+        """Hierarchical item numbers such as 2.3.5, from sibling order; the root has none."""
+        children = {}
+        for n in db.execute('SELECT id,parent_id FROM nodes WHERE root_id=? ORDER BY position,created', (root_id,)):
+            children.setdefault(n['parent_id'], []).append(n['id'])
+        numbers = {}
+
+        def walk(parent, prefix):
+            for index, child in enumerate(children.get(parent, []), 1):
+                numbers[child] = prefix + str(index)
+                walk(child, numbers[child] + '.')
+        walk(root_id, '')
+        return numbers
+
+    def chat_names(self):
+        """Number prefix that each item chat name must start with, for example '[2.3] '."""
+        with self.connect() as db:
+            names = {}
+            for root in db.execute('SELECT id FROM nodes WHERE parent_id IS NULL'):
+                numbers = self.numbers(db, root['id'])
+                for n in db.execute('SELECT id,chat_id,title FROM nodes WHERE root_id=? AND chat_id IS NOT NULL AND parent_id IS NOT NULL', (root['id'],)):
+                    names[n['chat_id']] = {'prefix': '[' + numbers[n['id']] + '] ', 'title': n['title']}
+            return names
+
+    def chat_title(self, node_id):
+        with self.connect() as db:
+            node = self.node(db, node_id)
+            number = self.numbers(db, node['root_id']).get(node['id'])
+            return '[' + number + '] ' + node['title'] if number else node['title']
+
     def context(self, db, node_id):
         chain, cursor = [], self.node(db, node_id)
         while cursor:
             chain.append(cursor)
             cursor = self.node(db, cursor['parent_id']) if cursor['parent_id'] else None
         chain.reverse()
-        return [{'node_id': n['id'], 'title': n['title'], 'description':n['description'], 'context': n['context'],
+        numbers = self.numbers(db, chain[0]['id'])
+        return [{'node_id': n['id'], 'number': numbers.get(n['id']), 'title': n['title'], 'description':n['description'], 'context': n['context'],
                  'chat_id':n['chat_id'], 'chat_url':'codex://threads/'+n['chat_id'] if n['chat_id'] else None,
                  'common_context': n['common_context'], 'revision': n['revision']} for n in chain]
 
@@ -173,7 +204,9 @@ class Store:
             root = self.node(db, selected['root_id'])
             nodes = [dict(r) for r in db.execute('SELECT * FROM nodes WHERE root_id=? ORDER BY position,created', (root['id'],))]
             runtime = {r['chat_id']: dict(r) for r in db.execute('SELECT chat_id,state,hook_seen,updated FROM runtime')}
+            numbers = self.numbers(db, root['id'])
             for n in nodes:
+                n['number'] = numbers.get(n['id'])
                 n['results'] = [dict(r) for r in db.execute('SELECT * FROM results WHERE parent_id=? ORDER BY created', (n['id'],))]
                 n['runtime'] = runtime.get(n['chat_id'], {'state': 'unknown', 'hook_seen': 0}) if n['chat_id'] else None
                 lock = db.execute('SELECT operation_id FROM locks WHERE node_id=?', (n['id'],)).fetchone()

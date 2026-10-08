@@ -102,6 +102,7 @@ header{position:sticky;top:0;z-index:5;background:var(--bg);padding:10px 12px 8p
 .check:hover:not(:disabled){background:var(--hover)}
 .check:disabled{opacity:1;cursor:default}
 .title{flex:1;min-width:0;text-align:left;padding:4px 4px;font-size:13px;line-height:18px;overflow-wrap:anywhere}
+.num{color:var(--muted);font-variant-numeric:tabular-nums;margin-right:6px;font-weight:400}
 .row.done .title{color:var(--muted)}
 .row.done .title .text{text-decoration:line-through;text-decoration-color:var(--faint)}
 .row.current .title{font-weight:600}
@@ -306,7 +307,7 @@ function focusHeader(n){const h=el('header',{class:'focus'}),p=byId(n.parent_id)
   const path=ancestors(p).map(a=>a.title).join(' › ');
   const up=button([icon('up',14),el('span',{class:'label',text:p.title})],()=>p.chat_id?openChat(p.chat_id):select(p.id),'parent-link',{title:'Open parent chat · '+path,'aria-label':'Open parent chat: '+p.title});
   h.append(el('div',{class:'bar'},[up,el('span',{class:'crumb-meta',text:'Item '+(index+1)+' of '+siblings.length+' · '+tally(siblings).done+' done'}),toolbar()]));
-  const s=status(n),title=el('div',{class:'focus-title'},[checkButton(n,18),el('h1',{text:n.title})]);
+  const s=status(n),title=el('div',{class:'focus-title'},[checkButton(n,18),el('h1',{},[n.number?el('span',{class:'num',text:n.number}):null,n.title])]);
   if(s==='working'||s==='stale'||s==='busy')title.append(el('span',{class:'pill '+(s==='stale'?'stale':'working'),text:stateText(n)}));
   h.append(title);if(searchOpen)h.append(searchField());return h}
 function displayModeButton(){const mode=displayMode==='fullscreen'?'inline':'fullscreen',label=mode==='inline'?'Show in chat':'Open in panel';return button(icon(mode==='inline'?'inline':'panel'),()=>action(()=>setDisplayMode(mode)),'icon-btn',{'aria-label':label,title:label})}
@@ -328,7 +329,7 @@ function row(n){const kids=children(n),open=expanded.has(n.id),s=status(n),t=tal
   const r=el('div',{class:'row'+(selected===n.id?' selected':'')+(isCurrent(n)?' current':'')+(s==='done'?' done':''),'data-id':n.id,role:'treeitem','aria-level':ancestors(n).length-1,'aria-selected':selected===n.id,'aria-expanded':kids.length?open:undefined});
   r.append(button(icon('chevron',12),()=>{open?expanded.delete(n.id):expanded.add(n.id);render()},'twisty',{'aria-label':(open?'Collapse ':'Expand ')+n.title,'aria-expanded':open,disabled:!kids.length||undefined,tabindex:'-1'}));
   r.append(checkButton(n));
-  r.append(button([el('span',{class:'text',text:n.title}),kids.length?el('span',{class:'count',text:t.done+'/'+t.total}):null],()=>select(n.id,{toggle:true}),'title',{'aria-label':n.title+', '+stateText(n)}));
+  r.append(button([n.number?el('span',{class:'num',text:n.number}):null,el('span',{class:'text',text:n.title}),kids.length?el('span',{class:'count',text:t.done+'/'+t.total}):null],()=>select(n.id,{toggle:true}),'title',{'aria-label':n.title+', '+stateText(n)}));
   const end=el('div',{class:'row-end'});
   if(isCurrent(n))end.append(el('span',{class:'pill here',text:'This chat'}));
   else if(s==='working')end.append(el('span',{class:'pill working',text:'Working'}));
@@ -354,7 +355,7 @@ function detail(n,{focus=false}={}){const s=status(n),box=el('div',{class:focus?
   const ctx=disclosure(n.id+':context','Context and decisions');for(const c of ancestors(n)){const own=c.id===n.id;if(c.common_context&&!own)ctx.append(el('div',{class:'ctx'},[el('div',{class:'ctx-label',text:'Shared · '+c.title}),el('div',{class:'ctx-text',text:c.common_context})]));if(c.context)ctx.append(el('div',{class:'ctx'},[el('div',{class:'ctx-label',text:own?'This item':'Item · '+c.title}),el('div',{class:'ctx-text',text:c.context})]))}if(n.common_context)ctx.append(el('div',{class:'ctx'},[el('div',{class:'ctx-label',text:'Shared with nested items'}),el('div',{class:'ctx-text',text:n.common_context})]));if(ctx.children.length===1)ctx.append(el('p',{class:'ctx-text',style:'margin-top:8px;color:var(--muted)',text:'No context added yet.'}));box.append(ctx);
   return box}
 function highlight(textValue){const i=textValue.toLocaleLowerCase().indexOf(query.toLocaleLowerCase());if(!query||i<0)return[textValue];return[textValue.slice(0,i),el('mark',{text:textValue.slice(i,i+query.length)}),textValue.slice(i+query.length)]}
-function renderResults(main){const q=query.toLocaleLowerCase(),matches=data.nodes.filter(n=>(n.title+' '+n.description).toLocaleLowerCase().includes(q));const list=el('div',{class:'results'});if(!matches.length)list.append(el('p',{class:'muted-line',text:'Nothing matches “'+query+'”.'}));for(const n of matches)list.append(button([statusIcon(status(n)),el('span',{},[el('span',{},highlight(n.title)),el('span',{class:'path',text:ancestors(n).slice(0,-1).map(x=>x.title).join(' › ')||'Tree root'})])],()=>select(n.id),'result'));main.append(list)}
+function renderResults(main){const q=query.toLocaleLowerCase(),matches=data.nodes.filter(n=>(n.title+' '+n.description).toLocaleLowerCase().includes(q));const list=el('div',{class:'results'});if(!matches.length)list.append(el('p',{class:'muted-line',text:'Nothing matches “'+query+'”.'}));for(const n of matches)list.append(button([statusIcon(status(n)),el('span',{},[n.number?el('span',{class:'num',text:n.number}):null,el('span',{},highlight(n.title)),el('span',{class:'path',text:ancestors(n).slice(0,-1).map(x=>x.title).join(' › ')||'Tree root'})])],()=>select(n.id),'result'));main.append(list)}
 function renderBody(){const body=document.getElementById('body');if(!body)return;body.replaceChildren();if(query){renderResults(body);return}
   const s=scopeNode();if(s.parent_id){const kids=children(s),t=tally(kids);body.append(detail(s,{focus:true}));if(!kids.length)return;body.append(el('div',{class:'section-head'},[el('h2',{text:'Checklist of this chat'}),el('span',{class:'progress-text',text:t.done+' of '+t.total+' done'+(t.working?' · '+t.working+' working':'')+(t.stale?' · '+t.stale+' changed':'')})]))}else if(rootInfo)body.append(detail(s));
   const outline=el('div',{class:'outline',role:'tree','aria-label':'Checklist for '+s.title,onkeydown:keyNav});branch(s,outline);

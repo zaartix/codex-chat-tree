@@ -28,6 +28,8 @@ Built-in UI and service instructions are English. Keep user titles, descriptions
 
 `start`, `finish`, `delete` and `rebuild` return `operation_id` and `token`. Read `tree_job`; at `requested`, call `tree_step claim`. Operations persist on the server. On failure, record `tree_step error` and report the reason and chat links. Do not bypass a refusal by waiting, interrupting agents or using another deletion method.
 
+Every item has a hierarchical number such as `2.3.5` (`number` in `tree_read`), derived from its position; the root has none. The user may refer to items by number. Item chat names start with `[number]`; the server keeps that prefix current when numbers shift and leaves the rest of the name alone.
+
 Items whose chats were deleted in Codex leave the tree with their branch the next time it is read. Do not recreate them unless the user asks.
 
 ### Start

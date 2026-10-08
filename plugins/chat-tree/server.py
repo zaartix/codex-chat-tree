@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Local stdio MCP. Browser preview uses the same dispatcher and isolated data."""
 import json
+import re
 import sys
 import threading
 import time
@@ -73,16 +74,25 @@ class Dispatcher:
         self.reconciled = None
 
     def reconcile(self):
-        """Forget items whose chats were deleted in Codex. Throttled; any failure leaves the tree unchanged."""
+        """Bring Codex chats in line with the tree: forget deleted chats and keep item numbers in chat names. Throttled."""
         if self.reconciled is not None and time.monotonic() - self.reconciled < RECONCILE_SECONDS:
             return
         self.reconciled = time.monotonic()
         try:
-            gone = self.history.deleted(self.store.linked_chats())
+            chats = self.history.inspect(self.store.linked_chats())
+            gone = [chat_id for chat_id, chat in chats.items() if chat is None]
+            if gone:
+                self.store.forget_chats(gone)
+            renames = {}
+            for chat_id, want in self.store.chat_names().items():
+                chat = chats.get(chat_id)
+                if chat and not chat['name'].startswith(want['prefix']):
+                    rest = re.sub(r'^\[[\d.]+\]\s*', '', chat['name']) or want['title']
+                    renames[chat_id] = want['prefix'] + rest
+            if renames:
+                self.history.rename(renames)
         except Exception:
             return
-        if gone:
-            self.store.forget_chats(gone)
 
     def _creation(self, change, chat_id):
         if change.get('action') != 'create':
@@ -138,7 +148,7 @@ class Dispatcher:
                 # A persistent fork is saved without a turn. No model turn runs: the server binds the chat it created,
                 # and the prompt hook delivers the branch context with the user's first message.
                 created = self.history.create(parent['chat_id'],
-                    lambda uuid: self.store.created(args['operation_id'], args['token'], args['node_id'], uuid), title=node['title'],
+                    lambda uuid: self.store.created(args['operation_id'], args['token'], args['node_id'], uuid), title=self.store.chat_title(node['id']),
                     reserve=lambda: self.store.reserve_creation(args['operation_id'], args['token'], args['node_id'], chat_id))
                 self.store.bind(args['operation_id'], args['token'], created['chat_id'], args['node_id'])
                 try:
@@ -219,6 +229,10 @@ class Dispatcher:
                 if not actor['ui']:
                     self.store.observe_turn(actor['chat_id'],actor['turn_id'])
                 result = self.call(name, args, actor)
+                if name in ('tree_change', 'tree_ui', 'tree_step', 'tree_create_saved_chat'):
+                    # Numbers shift when items are added, moved or removed.
+                    self.reconciled = None
+                    self.reconcile()
                 # A create/bind call can establish the chat association itself.
                 if not actor['ui']:
                     self.store.observe_turn(actor['chat_id'],actor['turn_id'])

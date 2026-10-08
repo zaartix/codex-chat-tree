@@ -82,19 +82,34 @@ class CodexHistory:
         with self.connection() as (call, messages):
             return call(2, method, params)
 
-    def deleted(self, chat_ids):
-        """Chats that no longer exist in Codex. Archived chats stay readable; any other failure counts as present."""
-        gone = []
+    def inspect(self, chat_ids):
+        """Current name and archive state of each chat; None for a chat that no longer exists in Codex.
+
+        Archived chats stay readable. A chat that fails for another reason is left out, so callers change nothing.
+        """
+        found = {}
         if not chat_ids:
-            return gone
+            return found
         with self.connection() as (call, messages):
             for identifier, chat_id in enumerate(chat_ids, 2):
                 try:
-                    call(identifier, 'thread/read', {'threadId': chat_id, 'includeTurns': False})
+                    thread = call(identifier, 'thread/read', {'threadId': chat_id, 'includeTurns': False})['thread']
                 except RuntimeError as error:
                     if str(error) == 'thread not loaded: ' + chat_id:
-                        gone.append(chat_id)
-        return gone
+                        found[chat_id] = None
+                    continue
+                found[chat_id] = {'name': thread.get('name') or '',
+                                  'archived': '/archived_sessions/' in (thread.get('path') or '')}
+        return found
+
+    def rename(self, names):
+        """Set chat names; renaming works even while Desktop has the chat open."""
+        with self.connection() as (call, messages):
+            for identifier, (chat_id, name) in enumerate(names.items(), 2):
+                try:
+                    call(identifier, 'thread/name/set', {'threadId': chat_id, 'name': name})
+                except RuntimeError:
+                    pass
 
     def hooks_trusted(self):
         """True when every Chat Tree lifecycle hook is enabled and trusted, so hooks will track new chats."""
