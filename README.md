@@ -41,6 +41,7 @@ To use your own phrase for it, add a rule to your AGENTS.md, for example: `When 
 - **Chats.** The server forks the parent chat before its first turn (`thread/fork`), verifies that every setting was inherited and binds the new chat to the item. No model turn runs. If inheritance cannot be verified, creation stops with an error.
 - **Hooks.** `UserPromptSubmit` adds the branch context to each message; `Stop`, `Interrupt` and `SessionEnd` record whether a chat is busy. A busy or unknown chat blocks completion, rebuilding and deletion.
 - **Data.** Trees are stored in `$CODEX_HOME/chat-tree/tree.sqlite3` (default `~/.codex/chat-tree/`) and survive updates and removal. Older data is not migrated: an incompatible database is reported as an error.
+- **Deleted chats.** When a linked chat is deleted in Codex, its item and the whole branch below it leave the tree the next time the tree is shown; deleting the root chat removes the tree. Chats of removed sub-items stay in Codex. Archived chats are kept, and branches in the middle of an operation are left to it.
 - **Moves.** Only branches without chats can be moved, because an existing chat keeps the settings of the parent it was forked from; a started branch is rebuilt instead.
 
 Remote environments have not been verified.

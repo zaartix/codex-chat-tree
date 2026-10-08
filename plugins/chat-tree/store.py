@@ -188,6 +188,47 @@ class Store:
                     'revision': root['revision'], 'contexts': self.context(db, selected['id']),
                     'proposals': proposals, 'operations': ops}
 
+    def linked_chats(self):
+        with self.connect() as db:
+            return [r['chat_id'] for r in db.execute('SELECT chat_id FROM nodes WHERE chat_id IS NOT NULL')]
+
+    def forget_chats(self, chat_ids):
+        """Remove items whose chats were deleted in Codex, with their whole branch; a deleted root chat removes its tree.
+
+        Chats of removed descendants stay in Codex. A branch reserved by an operation is left to that operation,
+        because delete and rebuild remove chats before they commit.
+        """
+        removed = []
+        with self.transaction() as db:
+            for chat_id in chat_ids:
+                row = db.execute('SELECT id FROM nodes WHERE chat_id=?', (chat_id,)).fetchone()
+                if not row:
+                    continue
+                branch = self.subtree(db, row['id'])
+                top, ids = branch[-1], [n['id'] for n in branch]
+                marks = ','.join('?' * len(ids))
+                if db.execute(f'SELECT 1 FROM locks WHERE node_id IN ({marks})', ids).fetchone():
+                    continue
+                if top['parent_id'] is None:
+                    db.execute('DELETE FROM proposals WHERE root_id=?', (top['id'],))
+                    db.execute('DELETE FROM summaries WHERE operation_id IN (SELECT id FROM operations WHERE root_id=?)', (top['id'],))
+                    db.execute('DELETE FROM operations WHERE root_id=?', (top['id'],))
+                db.execute(f'DELETE FROM summaries WHERE node_id IN ({marks})', ids)
+                db.execute(f'DELETE FROM summaries WHERE operation_id IN (SELECT id FROM operations WHERE node_id IN ({marks}))', ids)
+                db.execute(f'DELETE FROM operations WHERE node_id IN ({marks})', ids)
+                db.execute(f'DELETE FROM results WHERE parent_id IN ({marks})', ids)
+                chats = [n['chat_id'] for n in branch if n['chat_id']]
+                db.execute(f'DELETE FROM runtime WHERE chat_id IN ({",".join("?" * len(chats))})', chats)
+                for n in branch:
+                    db.execute('DELETE FROM nodes WHERE id=?', (n['id'],))
+                if top['parent_id']:
+                    self._touch(db, self.node(db, top['parent_id']))
+                db.execute('INSERT INTO audit(action,evidence,payload,created) VALUES(?,?,?,?)',
+                           ('forget_deleted_chat', encode({'source': 'codex_chat_deleted', 'chat_id': chat_id}),
+                            encode({'node_ids': ids, 'titles': [n['title'] for n in branch]}), time.time()))
+                removed.append({'chat_id': chat_id, 'node_ids': ids})
+        return removed
+
     def operation(self, db, operation_id):
         row = db.execute('SELECT * FROM operations WHERE id=?', (operation_id,)).fetchone()
         if not row:

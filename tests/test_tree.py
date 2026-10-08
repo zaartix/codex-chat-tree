@@ -63,6 +63,50 @@ class TreeTests(unittest.TestCase):
         self.store.advance(op['id'],op['token'],'claim',actor_chat='root-chat')
         with self.assertRaises(TreeError):self.store.service_prompt(op['id'],op['token'],self.a,'bootstrap')
 
+    def test_deleted_item_chat_removes_its_branch_only(self):
+        self.bind(self.a,'a-chat')
+        deep=self.change(action='add',parent_id=self.a,items=[{'title':'A1'},{'title':'A2'}])['item_ids']
+        self.bind(deep[0],'a1-chat')
+        before=self.node(self.root)['revision']
+        removed=self.store.forget_chats(['a-chat','unknown-chat'])
+        self.assertEqual([r['chat_id'] for r in removed],['a-chat']);self.assertEqual(set(removed[0]['node_ids']),{self.a,*deep})
+        ids={n['id'] for n in self.store.view('root-chat')['nodes']}
+        self.assertEqual(ids,{self.root,self.b})
+        self.assertGreater(self.node(self.root)['revision'],before)
+        with self.store.connect() as db:
+            self.assertIsNone(db.execute("SELECT 1 FROM runtime WHERE chat_id IN ('a-chat','a1-chat')").fetchone())
+            self.assertEqual(db.execute("SELECT action FROM audit ORDER BY id DESC").fetchone()['action'],'forget_deleted_chat')
+        self.assertEqual(self.store.linked_chats(),['root-chat'])
+
+    def test_deleted_root_chat_removes_the_tree(self):
+        self.bind(self.a,'a-chat')
+        self.store.propose({'action':'add','parent_id':self.b,'items':[{'title':'Later'}]},'root-chat')
+        self.store.forget_chats(['root-chat'])
+        self.assertEqual(self.store.view('root-chat')['roots'],[])
+        with self.store.connect() as db:
+            for table in ('nodes','proposals','operations','summaries','results','locks'):
+                self.assertIsNone(db.execute('SELECT 1 FROM '+table).fetchone(),table)
+
+    def test_reserved_branch_is_left_to_its_operation(self):
+        self.bind(self.a,'a-chat');self.op('delete',self.a)
+        self.assertEqual(self.store.forget_chats(['a-chat']),[])
+        self.assertEqual(self.node(self.a)['chat_id'],'a-chat')
+
+    def test_reading_the_tree_forgets_deleted_chats_with_throttling(self):
+        self.bind(self.a,'a-chat')
+        asked=[]
+        class History:
+            def deleted(inner,chats):
+                asked.append(sorted(chats));return ['a-chat']
+        dispatcher=Dispatcher(self.store,History())
+        actor={'chat_id':'root-chat','turn_id':None,'ui':True}
+        nodes=dispatcher.call('tree_read',{},actor)['nodes']
+        self.assertEqual({n['id'] for n in nodes},{self.root,self.b});self.assertEqual(asked,[['a-chat','root-chat']])
+        dispatcher.call('tree_read',{},actor);self.assertEqual(len(asked),1)
+        class Broken:
+            def deleted(inner,chats):raise RuntimeError('Codex CLI not found')
+        self.assertEqual(len(Dispatcher(self.store,Broken()).call('tree_read',{},actor)['nodes']),2)
+
     def test_linked_chat_can_browse_another_tree(self):
         other = self.store.apply({'action':'create','title':'Other','items':[{'title':'X'},{'title':'Y'}]}, EVIDENCE, 'other-chat')
         with self.store.transaction() as db:
@@ -550,6 +594,17 @@ class InheritanceTests(unittest.TestCase):
         def connection():yield call,self.events
         with patch.object(self.history,'connection',connection):
             return self.history.create('parent-chat',self.saved.append,title='Child title',reserve=lambda:self.reserved.append(True))
+
+    def test_only_missing_chats_count_as_deleted(self):
+        def call(identifier,method,params):
+            if params['threadId']=='gone':raise RuntimeError('thread not loaded: gone')
+            if params['threadId']=='flaky':raise RuntimeError('Codex AppServer timed out during thread/read')
+            return {'thread':{'id':params['threadId']}}
+        @contextmanager
+        def connection():yield call,self.events
+        with patch.object(self.history,'connection',connection):
+            self.assertEqual(self.history.deleted(['alive','gone','flaky']),['gone'])
+        self.assertEqual(self.history.deleted([]),[])
 
     def test_fork_inherits_settings_without_parent_history(self):
         result=self.run_create()

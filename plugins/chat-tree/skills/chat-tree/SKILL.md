@@ -28,6 +28,8 @@ Built-in UI and service instructions are English. Keep user titles, descriptions
 
 `start`, `finish`, `delete` and `rebuild` return `operation_id` and `token`. Read `tree_job`; at `requested`, call `tree_step claim`. Operations persist on the server. On failure, record `tree_step error` and report the reason and chat links. Do not bypass a refusal by waiting, interrupting agents or using another deletion method.
 
+Items whose chats were deleted in Codex leave the tree with their branch the next time it is read. Do not recreate them unless the user asks.
+
 ### Start
 
 1. Open an existing item `chat_id` with `navigate_to_codex_page`.

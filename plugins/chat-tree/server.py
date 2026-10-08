@@ -3,6 +3,7 @@
 import json
 import sys
 import threading
+import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
@@ -13,6 +14,7 @@ ROOT = Path(__file__).resolve().parent
 VERSION = json.loads((ROOT / '.codex-plugin' / 'plugin.json').read_text())['version']
 # A new URI per release makes hosts load the released panel.
 UI_URI = 'ui://chat-tree/v' + VERSION + '/tree.html'
+RECONCILE_SECONDS = 10
 
 
 def caller(params):
@@ -68,6 +70,19 @@ class Dispatcher:
         except TreeError as error:
             self.store, self.unavailable = None, error
         self.history = history or CodexHistory()
+        self.reconciled = None
+
+    def reconcile(self):
+        """Forget items whose chats were deleted in Codex. Throttled; any failure leaves the tree unchanged."""
+        if self.reconciled is not None and time.monotonic() - self.reconciled < RECONCILE_SECONDS:
+            return
+        self.reconciled = time.monotonic()
+        try:
+            gone = self.history.deleted(self.store.linked_chats())
+        except Exception:
+            return
+        if gone:
+            self.store.forget_chats(gone)
 
     def _creation(self, change, chat_id):
         if change.get('action') != 'create':
@@ -86,6 +101,7 @@ class Dispatcher:
     def call(self, name, args, actor):
         chat_id = actor['chat_id']
         if name in ('tree_panel', 'tree_read'):
+            self.reconcile()
             return self.store.view(chat_id, args.get('focus_id'), args.get('root_id'))
         if name == 'tree_propose':
             return self.store.propose(self._creation(args['change'], chat_id),chat_id)

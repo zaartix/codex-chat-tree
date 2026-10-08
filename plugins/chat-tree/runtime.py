@@ -82,6 +82,20 @@ class CodexHistory:
         with self.connection() as (call, messages):
             return call(2, method, params)
 
+    def deleted(self, chat_ids):
+        """Chats that no longer exist in Codex. Archived chats stay readable; any other failure counts as present."""
+        gone = []
+        if not chat_ids:
+            return gone
+        with self.connection() as (call, messages):
+            for identifier, chat_id in enumerate(chat_ids, 2):
+                try:
+                    call(identifier, 'thread/read', {'threadId': chat_id, 'includeTurns': False})
+                except RuntimeError as error:
+                    if str(error) == 'thread not loaded: ' + chat_id:
+                        gone.append(chat_id)
+        return gone
+
     def hooks_trusted(self):
         """True when every Chat Tree lifecycle hook is enabled and trusted, so hooks will track new chats."""
         hooks = [h for group in self.request('hooks/list', {}).get('data', []) for h in group.get('hooks', [])
