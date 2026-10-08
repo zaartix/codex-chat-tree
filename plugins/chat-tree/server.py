@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """Local stdio MCP. Browser preview uses the same dispatcher and isolated data."""
 import json
-import re
 import sys
 import threading
 import time
@@ -72,27 +71,23 @@ class Dispatcher:
             self.store, self.unavailable = None, error
         self.history = history or CodexHistory()
         self.reconciled = None
+        self.pending = []
 
-    def reconcile(self):
-        """Bring Codex chats in line with the tree: forget deleted chats and keep item numbers in chat names. Throttled."""
-        if self.reconciled is not None and time.monotonic() - self.reconciled < RECONCILE_SECONDS:
-            return
+    def reconcile(self, force=False):
+        """Compare Codex chats with the tree: forget deleted chats, close branches the user archived and list the
+        native actions (archive, unarchive, rename) the agent must apply. Throttled unless forced."""
+        if not force and self.reconciled is not None and time.monotonic() - self.reconciled < RECONCILE_SECONDS:
+            return self.pending
         self.reconciled = time.monotonic()
         try:
             chats = self.history.inspect(self.store.linked_chats())
             gone = [chat_id for chat_id, chat in chats.items() if chat is None]
             if gone:
                 self.store.forget_chats(gone)
-            renames = {}
-            for chat_id, want in self.store.chat_names().items():
-                chat = chats.get(chat_id)
-                if chat and not chat['name'].startswith(want['prefix']):
-                    rest = re.sub(r'^\[[\d.]+\]\s*', '', chat['name']) or want['title']
-                    renames[chat_id] = want['prefix'] + rest
-            if renames:
-                self.history.rename(renames)
+            self.pending = self.store.sync(chats)
         except Exception:
-            return
+            pass
+        return self.pending
 
     def _creation(self, change, chat_id):
         if change.get('action') != 'create':
@@ -111,7 +106,7 @@ class Dispatcher:
     def call(self, name, args, actor):
         chat_id = actor['chat_id']
         if name in ('tree_panel', 'tree_read'):
-            self.reconcile()
+            self.reconcile(force=not actor['ui'])
             return self.store.view(chat_id, args.get('focus_id'), args.get('root_id'))
         if name == 'tree_propose':
             return self.store.propose(self._creation(args['change'], chat_id),chat_id)
@@ -230,9 +225,10 @@ class Dispatcher:
                     self.store.observe_turn(actor['chat_id'],actor['turn_id'])
                 result = self.call(name, args, actor)
                 if name in ('tree_change', 'tree_ui', 'tree_step', 'tree_create_saved_chat'):
-                    # Numbers shift when items are added, moved or removed.
-                    self.reconciled = None
-                    self.reconcile()
+                    # Numbers shift and archive states change with the tree.
+                    self.reconcile(force=True)
+                if not actor['ui'] and isinstance(result, dict) and self.pending:
+                    result = {**result, 'sync': self.pending}
                 # A create/bind call can establish the chat association itself.
                 if not actor['ui']:
                     self.store.observe_turn(actor['chat_id'],actor['turn_id'])

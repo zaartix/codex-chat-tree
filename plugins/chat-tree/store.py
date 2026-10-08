@@ -1,6 +1,7 @@
 """Task graph, revisioned changes and durable operation journal."""
 import hashlib
 import json
+import re
 import os
 import secrets
 import sqlite3
@@ -103,6 +104,8 @@ class Store:
                 CREATE TABLE IF NOT EXISTS audit(
                   id INTEGER PRIMARY KEY, action TEXT NOT NULL, evidence TEXT NOT NULL,
                   payload TEXT NOT NULL, created REAL NOT NULL);
+                CREATE TABLE IF NOT EXISTS chat_sync(
+                  chat_id TEXT PRIMARY KEY, archived INTEGER NOT NULL, updated REAL NOT NULL);
             ''')
             db.execute(f'PRAGMA user_version={SCHEMA_VERSION}')
 
@@ -185,7 +188,7 @@ class Store:
         with self.connect() as db:
             roots = [dict(r) for r in db.execute('''SELECT r.*,
                 (SELECT COUNT(*) FROM nodes c WHERE c.parent_id=r.id) AS items,
-                (SELECT COUNT(*) FROM nodes c WHERE c.parent_id=r.id AND c.state='done' AND c.stale=0) AS done
+                (SELECT COUNT(*) FROM nodes c WHERE c.parent_id=r.id AND c.state IN ('done','closed') AND c.stale=0) AS done
                 FROM nodes r WHERE r.parent_id IS NULL ORDER BY r.updated DESC''')]
             current = db.execute('SELECT id,root_id FROM nodes WHERE chat_id=?', (chat_id,)).fetchone() if chat_id else None
             # An explicit tree choice wins over the chat's own tree, so linked chats can browse other trees.
@@ -199,7 +202,7 @@ class Store:
                 proposals = [dict(r) for r in db.execute("SELECT * FROM proposals WHERE root_id IS NULL AND owner_chat=? AND state='pending' ORDER BY created",(chat_id,))]
                 for p in proposals:
                     p['payload'] = json.loads(p['payload'])
-                return {'roots': roots, 'nodes': [], 'current_node_id': None, 'current_root_id': None, 'focus_id': None,
+                return {'chat_id': chat_id, 'roots': roots, 'nodes': [], 'current_node_id': None, 'current_root_id': None, 'focus_id': None,
                         'proposals': proposals, 'operations': [], 'revision': None}
             root = self.node(db, selected['root_id'])
             nodes = [dict(r) for r in db.execute('SELECT * FROM nodes WHERE root_id=? ORDER BY position,created', (root['id'],))]
@@ -215,11 +218,96 @@ class Store:
             for p in proposals:
                 p['payload'] = json.loads(p['payload'])
             ops = [self.operation(db, r['id']) for r in db.execute("SELECT id FROM operations WHERE root_id=? AND stage NOT IN ('done','cancelled') ORDER BY created", (root['id'],))]
-            return {'roots': roots, 'root': root, 'nodes': nodes,
+            return {'chat_id': chat_id, 'roots': roots, 'root': root, 'nodes': nodes,
                     'current_node_id': current['id'] if current else None,
                     'current_root_id': current['root_id'] if current else None, 'focus_id': selected['id'],
                     'revision': root['revision'], 'contexts': self.context(db, selected['id']),
                     'proposals': proposals, 'operations': ops}
+
+    def context_nodes(self, db, node_id):
+        chain, cursor = [], self.node(db, node_id)
+        while cursor:
+            chain.append(cursor)
+            cursor = self.node(db, cursor['parent_id']) if cursor['parent_id'] else None
+        return chain
+
+    @staticmethod
+    def _want(db, chat_ids, archived):
+        """Record the archive state a chat must reach; the agent applies it with native Desktop tools."""
+        for chat_id in filter(None, chat_ids):
+            db.execute('''INSERT INTO chat_sync VALUES(?,?,?) ON CONFLICT(chat_id) DO UPDATE SET
+                          archived=excluded.archived,updated=excluded.updated''', (chat_id, archived, time.time()))
+
+    def close_archived(self, chat_ids):
+        """The user archived these item chats: close each branch without summaries and archive its chats.
+
+        Finished items keep their result. Open operations in the branch are cancelled, except delete and rebuild,
+        which archive chats themselves.
+        """
+        closed = []
+        with self.transaction() as db:
+            for chat_id in chat_ids:
+                row = db.execute('SELECT id FROM nodes WHERE chat_id=?', (chat_id,)).fetchone()
+                if not row:
+                    continue
+                branch = self.subtree(db, row['id'])
+                ids = [n['id'] for n in branch]
+                marks = ','.join('?' * len(ids))
+                if db.execute(f'''SELECT 1 FROM locks l JOIN operations o ON o.id=l.operation_id
+                                   WHERE l.node_id IN ({marks}) AND o.kind IN ('delete','rebuild')''', ids).fetchone():
+                    continue
+                db.execute(f"UPDATE nodes SET state='closed' WHERE state!='done' AND id IN ({marks})", ids)
+                open_ops = [r['id'] for r in db.execute(
+                    f"SELECT id FROM operations WHERE stage NOT IN ('done','cancelled') AND node_id IN ({marks})", ids)]
+                for operation_id in open_ops:
+                    db.execute("UPDATE operations SET stage='cancelled',updated=? WHERE id=?", (time.time(), operation_id))
+                    db.execute('DELETE FROM locks WHERE operation_id=?', (operation_id,))
+                self._want(db, [n['chat_id'] for n in branch], archived=1)
+                self._touch(db, branch[-1])
+                db.execute('INSERT INTO audit(action,evidence,payload,created) VALUES(?,?,?,?)',
+                           ('close_archived_chat', encode({'source': 'codex_chat_archived', 'chat_id': chat_id}),
+                            encode({'node_ids': ids}), time.time()))
+                closed.append({'chat_id': chat_id, 'node_ids': ids})
+        return closed
+
+    def sync(self, chats):
+        """Compare Codex chats with the tree and return the native actions still needed.
+
+        `chats` maps chat ids to {'title', 'archived'} as Codex reports them. A requested archive state that Codex
+        already shows is settled. An item chat archived without a request closes its branch.
+        """
+        with self.connect() as db:
+            wants = {r['chat_id']: dict(r) for r in db.execute('SELECT * FROM chat_sync')}
+            nodes = {r['chat_id']: dict(r) for r in db.execute('SELECT * FROM nodes WHERE chat_id IS NOT NULL')}
+        archived_by_user = [c for c, chat in chats.items() if chat and chat['archived'] and c in nodes
+                            and nodes[c]['state'] not in ('done', 'closed') and c not in wants]
+        if archived_by_user:
+            self.close_archived(archived_by_user)
+        titles = self.chat_names()
+        actions = []
+        with self.transaction() as db:
+            wants = {r['chat_id']: dict(r) for r in db.execute('SELECT * FROM chat_sync')}
+            for chat_id, chat in chats.items():
+                if not chat:
+                    continue
+                want = wants.get(chat_id, {})
+                if want and bool(want['archived']) == chat['archived']:
+                    db.execute('DELETE FROM chat_sync WHERE chat_id=?', (chat_id,))
+                elif want:
+                    actions.append({'action': 'archive' if want['archived'] else 'unarchive', 'threadId': chat_id})
+                name = titles.get(chat_id)
+                # Archived chats get their number when they are unarchived.
+                if name and not chat['archived'] and not chat['title'].startswith(name['prefix']):
+                    rest = re.sub(r'^\[[\d.]+\]\s*', '', chat['title']) or name['title']
+                    actions.append({'action': 'rename', 'threadId': chat_id, 'title': name['prefix'] + rest})
+        return actions
+
+    def pending_archives(self, root_id, except_chat=None):
+        """Requested archive changes in one tree that Codex has not confirmed yet."""
+        with self.connect() as db:
+            return [{'action': 'archive' if r['archived'] else 'unarchive', 'threadId': r['chat_id']}
+                    for r in db.execute('''SELECT s.* FROM chat_sync s JOIN nodes n ON n.chat_id=s.chat_id
+                                          WHERE n.root_id=? ORDER BY s.updated''', (root_id,)) if r['chat_id'] != except_chat]
 
     def linked_chats(self):
         with self.connect() as db:
@@ -252,6 +340,7 @@ class Store:
                 db.execute(f'DELETE FROM results WHERE parent_id IN ({marks})', ids)
                 chats = [n['chat_id'] for n in branch if n['chat_id']]
                 db.execute(f'DELETE FROM runtime WHERE chat_id IN ({",".join("?" * len(chats))})', chats)
+                db.execute(f'DELETE FROM chat_sync WHERE chat_id IN ({",".join("?" * len(chats))})', chats)
                 for n in branch:
                     db.execute('DELETE FROM nodes WHERE id=?', (n['id'],))
                 if top['parent_id']:
@@ -414,6 +503,7 @@ class Store:
                 result = {'node_id': node['id']}
             elif action == 'reopen':
                 db.execute("UPDATE nodes SET state='todo' WHERE id=?",(node['id'],))
+                self._want(db, [node['chat_id']], archived=0)
                 self._touch(db,node)
                 result={'node_id':node['id']}
             elif action in ('start', 'finish', 'delete', 'rebuild'):
@@ -654,6 +744,7 @@ class Store:
                     if op['node_id'] not in op['summaries'] or (node['parent_id'] and not payload['delivered']):
                         raise TreeError('incomplete', 'Save the summary and deliver it to the parent first')
                     db.execute("UPDATE nodes SET state='done',summary=?,stale=0 WHERE id=?", (op['summaries'][node['id']]['summary'], node['id']))
+                    self._want(db, [node['chat_id']], archived=1)
                 elif op['kind'] in ('delete', 'rebuild'):
                     required = {n['id'] for n in payload['nodes'] if n['chat_id']}
                     if not required.issubset(payload['completed']):
@@ -722,13 +813,17 @@ class Store:
                     raise TreeError('locked', 'An approved operation has reserved this branch. Finish or cancel it in the panel.', operation_id=lock['operation_id'])
                 state = 'service' if service else 'running'
                 first_prompt = not service and (prior is None or prior['turn_id'] is None)
-                # A completed item's chat is archived; new work in it means the item is no longer done.
-                if not service and node['state'] == 'done':
-                    db.execute("UPDATE nodes SET state='todo' WHERE id=?", (node['id'],))
+                # A finished item's chat is archived; new work in it reopens the item and every finished ancestor,
+                # so an open item never sits under a closed parent.
+                if not service and node['state'] in ('done', 'closed'):
+                    chain = [n for n in self.context_nodes(db, node['id']) if n['state'] in ('done', 'closed')]
+                    for n in chain:
+                        db.execute("UPDATE nodes SET state='todo' WHERE id=?", (n['id'],))
+                    self._want(db, [n['chat_id'] for n in chain], archived=0)
                     self._touch(db, dict(node))
                     db.execute('INSERT INTO audit(action,evidence,payload,created) VALUES(?,?,?,?)',
                                ('reopen_on_new_turn', encode({'source': 'user_prompt_hook', 'chat_id': chat_id, 'turn_id': turn_id}),
-                                encode({'node_id': node['id']}), time.time()))
+                                encode({'node_ids': [n['id'] for n in chain]}), time.time()))
                     reopened = True
                 db.execute('''INSERT INTO runtime VALUES(?,?,?,?,1,?) ON CONFLICT(chat_id) DO UPDATE SET
                               state=excluded.state,turn_id=excluded.turn_id,prompt=excluded.prompt,hook_seen=1,updated=excluded.updated''',

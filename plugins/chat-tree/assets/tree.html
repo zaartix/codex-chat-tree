@@ -104,6 +104,8 @@ header{position:sticky;top:0;z-index:5;background:var(--bg);padding:10px 12px 8p
 .title{flex:1;min-width:0;text-align:left;padding:4px 4px;font-size:13px;line-height:18px;overflow-wrap:anywhere}
 .num{color:var(--muted);font-variant-numeric:tabular-nums;margin-right:6px;font-weight:400}
 .row.done .title{color:var(--muted)}
+.row.closed .title{color:var(--faint)}
+.status.closed{color:var(--faint)}
 .row.done .title .text{text-decoration:line-through;text-decoration-color:var(--faint)}
 .row.current .title{font-weight:600}
 .count{margin-left:6px;font-size:11.5px;color:var(--faint);font-variant-numeric:tabular-nums;font-weight:400}
@@ -240,8 +242,8 @@ const byId=id=>data?.nodes?.find(n=>n.id===id);
 function ancestors(n){const chain=[];while(n){chain.unshift(n);n=byId(n.parent_id)}return chain}
 function children(n){return data.nodes.filter(x=>x.parent_id===n.id)}
 function descendants(n){return data.nodes.filter(x=>x.id!==n.id&&ancestors(x).some(a=>a.id===n.id))}
-function status(n){if(n.locked_by||starting.has(n.id))return'busy';if(n.stale)return'stale';if(n.state==='done')return'done';if(!n.chat_id)return'new';const r=n.runtime?.state;return r==='running'||r==='service'?'working':'ready'}
-const STATUS_TEXT={new:'Not started',ready:'Chat ready',working:'Agent working',done:'Completed',stale:'Context changed',busy:'Operation in progress'};
+function status(n){if(n.locked_by||starting.has(n.id))return'busy';if(n.stale)return'stale';if(n.state==='done')return'done';if(n.state==='closed')return'closed';if(!n.chat_id)return'new';const r=n.runtime?.state;return r==='running'||r==='service'?'working':'ready'}
+const STATUS_TEXT={new:'Not started',ready:'Chat ready',working:'Agent working',done:'Completed',closed:'Closed without result',stale:'Context changed',busy:'Operation in progress'};
 function stateText(n){return starting.has(n.id)?'Creating chat…':STATUS_TEXT[status(n)]}
 function isCurrent(n){return n.id===data.current_node_id}
 function canStart(n){const p=byId(n.parent_id);return !n.chat_id&&!!p?.chat_id}
@@ -255,10 +257,11 @@ function statusIcon(s,size=16){const svg={
   working:'<circle cx="8" cy="8" r="6" fill="none" stroke="currentColor" stroke-opacity=".25" stroke-width="1.6"/><path class="spin" d="M8 2a6 6 0 0 1 6 6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>',
   busy:'<circle cx="8" cy="8" r="6" fill="none" stroke="currentColor" stroke-opacity=".25" stroke-width="1.6"/><path class="spin" d="M8 2a6 6 0 0 1 6 6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>',
   done:'<circle cx="8" cy="8" r="7" fill="currentColor"/><path d="M5 8.2l2 2 4-4.4" fill="none" stroke="var(--bg)" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>',
+  closed:'<circle cx="8" cy="8" r="6.3" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M5.6 5.6l4.8 4.8M10.4 5.6l-4.8 4.8" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>',
   stale:'<circle cx="8" cy="8" r="6" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M8 4.8v3.6" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><circle cx="8" cy="10.9" r=".95" fill="currentColor"/>'}[s];
   return el('span',{class:'status '+s,'aria-hidden':'true',html:'<svg width="'+size+'" height="'+size+'" viewBox="0 0 16 16">'+svg+'</svg>'})}
 function ring(done,total,size=16){const r=6,c=2*Math.PI*r,p=total?done/total:0;return el('span',{class:'ring','aria-hidden':'true',html:'<svg width="'+size+'" height="'+size+'" viewBox="0 0 16 16"><circle cx="8" cy="8" r="'+r+'" fill="none" stroke="var(--line-strong)" stroke-width="2"/><circle cx="8" cy="8" r="'+r+'" fill="none" stroke="var(--done)" stroke-width="2" stroke-linecap="round" stroke-dasharray="'+(c*p)+' '+c+'" transform="rotate(-90 8 8)"/></svg>'})}
-function tally(list){const t={total:list.length,done:0,working:0,stale:0};for(const n of list){const s=status(n);if(s==='done')t.done++;else if(s==='working'||s==='busy')t.working++;else if(s==='stale')t.stale++}return t}
+function tally(list){const t={total:list.length,done:0,working:0,stale:0};for(const n of list){const s=status(n);if(s==='done'||s==='closed')t.done++;else if(s==='working'||s==='busy')t.working++;else if(s==='stale')t.stale++}return t}
 
 /* ---------- Selection and data ---------- */
 function reveal(id){for(const a of ancestors(byId(id)).slice(0,-1))expanded.add(a.id)}
@@ -277,7 +280,7 @@ function confirm(title,copy,fn,{label='Continue'}={}){document.getElementById('c
 function start(n){return action(()=>perform({action:'start',node_id:n.id}))}
 function complete(n){const nested=descendants(n).filter(x=>x.chat_id).length;confirm('Complete “'+n.title+'”?',(nested?'The agent will collect fresh summaries from '+nested+' nested chat'+(nested>1?'s':'')+' and ':'The agent will write a summary and ')+(n.parent_id?'deliver it to the parent chat.':'save it as the tree result.')+' Only this item is marked complete; its chat stays available.',()=>perform({action:'finish',node_id:n.id}),{label:'Complete'})}
 function reopen(n){return action(()=>perform({action:'reopen',node_id:n.id}))}
-function toggleCheck(n){if(n.state==='done')return reopen(n);if(!n.chat_id)return notify(canStart(n)?'Start this item’s chat before completing it.':'Start the parent chat first.');complete(n)}
+function toggleCheck(n){if(n.state==='done'||n.state==='closed')return reopen(n);if(!n.chat_id)return notify(canStart(n)?'Start this item’s chat before completing it.':'Start the parent chat first.');complete(n)}
 
 /* ---------- Menus ---------- */
 let menuOwner=null;
@@ -314,7 +317,7 @@ function displayModeButton(){const mode=displayMode==='fullscreen'?'inline':'ful
 function banners(){const stack=el('div',{class:'stack'});
   if(data.current_root_id&&data.current_root_id!==data.root.id)stack.append(el('div',{class:'banner'},[el('span',{class:'grow',text:'You are browsing another tree. This chat belongs to a different one.'}),button('Back to this chat’s tree',()=>selectRoot(data.current_root_id),'btn')]));
   const relevant=id=>{const n=byId(id);return scopeNode().parent_id?!!n&&inScope(n):true};
-  for(const op of data.operations.filter(o=>relevant(o.node_id))){const n=byId(op.node_id);const title={start:'Creating chat',finish:'Completing',delete:'Deleting',rebuild:'Rebuilding'}[op.kind]||op.kind;const stage={requested:'waiting for the agent',creating:'creating chat',collecting:'collecting summaries',preparing:'preparing replacements',deleting:'deleting old chats'}[op.stage]||op.stage;const b=el('div',{class:'banner work'},[statusIcon('working'),el('span',{class:'grow'},[el('strong',{text:title+(n?' “'+n.title+'”':'')}),' · '+stage,...(op.error?[el('div',{class:'small',text:op.error})]:[])]),button('Continue',()=>action(()=>dispatch(op)),'btn')]);if(!op.payload.creations&&!op.payload.replacement_ids.length&&!op.payload.completed.length)b.append(button('Cancel',()=>action(async()=>{await tool('tree_ui',{operation_id:op.id,token:op.token,step:'cancel'});await refresh()}),'btn ghost'));stack.append(b)}
+  for(const op of data.operations.filter(o=>relevant(o.node_id))){const n=byId(op.node_id);const title={start:'Creating chat',finish:'Completing',delete:'Deleting',rebuild:'Rebuilding'}[op.kind]||op.kind;const stage={requested:'waiting for the agent',creating:'creating chat',collecting:'collecting summaries',preparing:'preparing replacements',deleting:'deleting old chats'}[op.stage]||op.stage;const b=el('div',{class:'banner work'},[statusIcon('working'),el('span',{class:'grow'},[el('strong',{text:title+(n?' “'+n.title+'”':'')}),' · '+stage,...(op.error?[el('div',{class:'small',text:op.error})]:[])]),(op.payload.actor_chat===data.chat_id?button('Continue',()=>action(()=>dispatch(op)),'btn'):button('Open its chat',()=>openChat(op.payload.actor_chat),'btn'))]);if(!op.payload.creations&&!op.payload.replacement_ids.length&&!op.payload.completed.length)b.append(button('Cancel',()=>action(async()=>{await tool('tree_ui',{operation_id:op.id,token:op.token,step:'cancel'});await refresh()}),'btn ghost'));stack.append(b)}
   for(const p of data.proposals.filter(p=>relevant(p.payload.node_id||p.payload.parent_id)))stack.append(proposalCard(p));
   return stack.children.length?stack:null}
 function proposalCard(p){const change=p.payload,label={create:'Create a Chat Tree',add:'Add items',edit:'Edit branch',move:'Move branch',start:'Open branch',finish:'Complete branch',reopen:'Reopen item',delete:'Delete branch',rebuild:'Rebuild branch'}[change.action]||'Change';const target=byId(change.node_id||change.parent_id);
@@ -324,9 +327,9 @@ function proposalCard(p){const change=p.payload,label={create:'Create a Chat Tre
   if(change.action==='move'){const dst=byId(change.destination_id);card.append(el('p',{class:'field'},[el('span',{text:'Move to: '}),dst?.title||'Selected branch']))}
   if(['delete','rebuild'].includes(change.action))card.append(el('p',{class:'note',text:'Approval includes permanently deleting the old chats in this branch.'}));
   card.append(el('div',{class:'card-actions'},[button('Approve',()=>action(async()=>{const r=await tool('tree_ui',{proposal_id:p.id});await followResult(r);await refresh()}),'btn primary'),button('Dismiss',()=>action(async()=>{await tool('tree_ui',{dismiss_proposal:p.id});await refresh()}),'btn ghost')]));return card}
-function checkButton(n,size=16){const b=button(statusIcon(status(n),size),()=>toggleCheck(n),'check',{role:'checkbox','aria-checked':n.state==='done','aria-label':(n.state==='done'?'Reopen ':'Complete ')+n.title,title:stateText(n)+(n.state==='done'?' · click to reopen':n.chat_id?' · click to complete':''),tabindex:'-1'});if(n.locked_by||starting.has(n.id))b.disabled=true;return b}
+function checkButton(n,size=16){const b=button(statusIcon(status(n),size),()=>toggleCheck(n),'check',{role:'checkbox','aria-checked':(n.state==='done'||n.state==='closed'),'aria-label':((n.state==='done'||n.state==='closed')?'Reopen ':'Complete ')+n.title,title:stateText(n)+((n.state==='done'||n.state==='closed')?' · click to reopen':n.chat_id?' · click to complete':''),tabindex:'-1'});if(n.locked_by||starting.has(n.id))b.disabled=true;return b}
 function row(n){const kids=children(n),open=expanded.has(n.id),s=status(n),t=tally(kids);
-  const r=el('div',{class:'row'+(selected===n.id?' selected':'')+(isCurrent(n)?' current':'')+(s==='done'?' done':''),'data-id':n.id,role:'treeitem','aria-level':ancestors(n).length-1,'aria-selected':selected===n.id,'aria-expanded':kids.length?open:undefined});
+  const r=el('div',{class:'row'+(selected===n.id?' selected':'')+(isCurrent(n)?' current':'')+(s==='done'?' done':'')+(s==='closed'?' closed':''),'data-id':n.id,role:'treeitem','aria-level':ancestors(n).length-1,'aria-selected':selected===n.id,'aria-expanded':kids.length?open:undefined});
   r.append(button(icon('chevron',12),()=>{open?expanded.delete(n.id):expanded.add(n.id);render()},'twisty',{'aria-label':(open?'Collapse ':'Expand ')+n.title,'aria-expanded':open,disabled:!kids.length||undefined,tabindex:'-1'}));
   r.append(checkButton(n));
   r.append(button([n.number?el('span',{class:'num',text:n.number}):null,el('span',{class:'text',text:n.title}),kids.length?el('span',{class:'count',text:t.done+'/'+t.total}):null],()=>select(n.id,{toggle:true}),'title',{'aria-label':n.title+', '+stateText(n)}));
@@ -348,7 +351,7 @@ function detail(n,{focus=false}={}){const s=status(n),box=el('div',{class:focus?
   const acts=el('div',{class:'actions'});
   if(n.chat_id&&!isCurrent(n))acts.append(button([icon('chat',14),'Open chat'],()=>openChat(n.chat_id),'btn primary'));
   else if(canStart(n))acts.append(button([icon('play',10),starting.has(n.id)?'Creating…':'Start chat'],()=>start(n),'btn primary',{disabled:starting.has(n.id)||!!n.locked_by||undefined}));
-  if(n.state==='done')acts.append(button('Reopen',()=>reopen(n),'btn'));else if(n.chat_id)acts.append(button(n.parent_id?'Complete':'Complete tree',()=>complete(n),'btn',{disabled:!!n.locked_by||undefined}));
+  if(n.state==='done'||n.state==='closed')acts.append(button('Reopen',()=>reopen(n),'btn'));else if(n.chat_id)acts.append(button(n.parent_id?'Complete':'Complete tree',()=>complete(n),'btn',{disabled:!!n.locked_by||undefined}));
   if(acts.children.length)box.append(acts);
   if(n.summary)box.append(el('div',{class:'summary'+(n.state==='done'?'':' prev'),text:n.summary}));
   if(n.results?.length){const res=disclosure(n.id+':results','Saved results · '+n.results.length);for(const r of n.results)res.append(el('div',{class:'ctx'},[el('div',{class:'ctx-label',text:r.source_title}),el('div',{class:'ctx-text',text:r.summary})]));box.append(res)}

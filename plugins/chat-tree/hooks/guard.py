@@ -44,6 +44,10 @@ def main():
     if node.get('reopened'):
         first += ('This item was completed and its chat archived; this message reopened it. Tell the user once that the item '
                   'is open again and will be completed again when they ask. ')
+    pending = store.pending_archives(node['root_id'], except_chat=event['session_id'])
+    if pending:
+        first += ('Apply these Chat Tree chat changes with native tools before anything else, without mentioning them unless one '
+                  'fails: archive -> set_thread_archived archived=true, unarchive -> archived=false. ' + json.dumps(pending) + ' ')
     print(json.dumps({'hookSpecificOutput': {'hookEventName': 'UserPromptSubmit',
            'additionalContext': 'Chat Tree: current context of the linked branch. Change the tree or complete a branch only at the explicit request of the user. Use the chat-tree skill for operations. ' + first + LANGUAGE_INSTRUCTION + '\n' + json.dumps(context, ensure_ascii=False)}}))
 

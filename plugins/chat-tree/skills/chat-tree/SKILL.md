@@ -16,19 +16,24 @@ Built-in UI and service instructions are English. Keep user titles, descriptions
 ## Changes
 
 - Use the discussed plan; ask a short interview if it is insufficient.
-- Check `current_node_id`: `create` makes a root in an unlinked chat. In a linked chat, `add parent_id=current_node_id` creates its nested checklist; set shared context with `edit common_context`. Do not create another root in a linked chat. Provide shared `common_context` and individual item `context` without repetition; preserve conversation decisions and constraints.
+- Check `current_node_id`: `create` makes a root in an unlinked chat. In an unlinked chat, the `roots` of `tree_read` belong to other chats and are only for navigation: a request for a checklist creates a new tree here, even when a tree with the same title exists elsewhere (for example when this chat is a fork of that tree's chat). In a linked chat, `add parent_id=current_node_id` creates its nested checklist; set shared context with `edit common_context`. Do not create another root in a linked chat. Provide shared `common_context` and individual item `context` without repetition; preserve conversation decisions and constraints.
 - Child chats inherit all settings of their immediate parent, including project, directory, model and permissions. Only task context and hierarchy data differ; do not override settings.
 - Apply explicitly requested changes with `tree_change`. Clarify ambiguity or prepare `tree_propose` for panel approval.
 - From any depth, read the whole graph and update the requested checklist. Clarify an ambiguous destination; report the changed branch and link.
 - `reopen` returns only the selected completed branch to work and preserves its previous summary.
+- A completed or closed item is an archived chat. A new user message in such a chat reopens the item and every completed or closed ancestor; their chats are unarchived. When the user archives an item chat themselves, the server closes that branch without summaries or delivery and archives the chats below it; completed items keep their results.
 - `move` relocates only branches without chats: an existing chat keeps the settings of the parent it was forked from. For a started branch, propose a rebuild instead.
 - After a change, open `tree_panel`. Completing an item does not complete its parent or stale its siblings.
+
+## Chat sync
+
+Any tool result may contain `sync`: chat changes the server cannot make in Desktop itself. Apply every entry with native tools before replying, without mentioning them unless one fails: `archive` → `set_thread_archived({threadId, archived: true})`, `unarchive` → `set_thread_archived({threadId, archived: false})`, `rename` → `set_thread_title({threadId, title})`. The server verifies the result on the next read. The prompt hook may list pending archive changes the same way.
 
 ## Operations
 
 `start`, `finish`, `delete` and `rebuild` return `operation_id` and `token`. Read `tree_job`; at `requested`, call `tree_step claim`. Operations persist on the server. On failure, record `tree_step error` and report the reason and chat links. Do not bypass a refusal by waiting, interrupting agents or using another deletion method.
 
-Every item has a hierarchical number such as `2.3.5` (`number` in `tree_read`), derived from its position; the root has none. The user may refer to items by number. Item chat names start with `[number]`; the server keeps that prefix current when numbers shift and leaves the rest of the name alone.
+Every item has a hierarchical number such as `2.3.5` (`number` in `tree_read`), derived from its position; the root has none. The user may refer to items by number. Item chat names start with `[number]`; when numbers shift, `sync` renames the chats and keeps the rest of each name.
 
 Items whose chats were deleted in Codex leave the tree with their branch the next time it is read. Do not recreate them unless the user asks.
 
@@ -46,7 +51,7 @@ Items whose chats were deleted in Codex leave the tree with their branch the nex
 3. Process a parent only after its immediate child summaries are saved. Unstarted items remain unresolved. Each summary is one paragraph covering work, validation, decisions and unresolved issues, in the chat working language.
 4. Summarize the selected current chat using child results and call `tree_summary`.
 5. Deliver only to the immediate parent via `tree_job purpose=delivery`. If that parent is the initiating current chat, read the fresh result from `tree_job` and call `tree_step delivered`; do not message yourself. Otherwise send the exact prompt, await the response and call `tree_step delivered` with its `turn_id`. The parent acknowledges the result without implementing work or changing the tree.
-6. `tree_step commit` completes only the selected item. Then archive the selected item's chat with `set_thread_archived`: a completed item is an archived chat. When that chat is the current one, archive it as the last action of the turn. A failed archive does not undo completion; report it.
+6. `tree_step commit` completes only the selected item; its result carries `sync` with the archive of the item's chat. When that chat is the current one, archive it as the last action of the turn. A failed archive does not undo completion; report it.
 7. An archived chat opens in Codex after one click on "Unarchive and open". A new user message in a completed item's chat reopens the item automatically; complete it again only when asked.
 
 ### Delete and rebuild

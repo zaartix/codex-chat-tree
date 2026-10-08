@@ -97,7 +97,7 @@ class TreeTests(unittest.TestCase):
         asked=[]
         class History:
             def inspect(inner,chats):
-                asked.append(sorted(chats));return {'a-chat':None,'root-chat':{'name':'Root','archived':False}}
+                asked.append(sorted(chats));return {'a-chat':None,'root-chat':{'title':'Root','archived':False}}
         dispatcher=Dispatcher(self.store,History())
         actor={'chat_id':'root-chat','turn_id':None,'ui':True}
         nodes=dispatcher.call('tree_read',{},actor)['nodes']
@@ -115,20 +115,72 @@ class TreeTests(unittest.TestCase):
         self.assertEqual(self.store.chat_title(deeper),'[2.2.1] B2a');self.assertEqual(self.store.chat_title(self.root),'Root')
         with self.store.connect() as db:self.assertEqual([c['number'] for c in self.store.context(db,deeper)],[None,'2','2.2','2.2.1'])
 
+    def sync_with(self, chats, actor=None):
+        class History:
+            def inspect(inner, ids):return {c:chats.get(c,{'title':'','archived':False}) for c in ids}
+        dispatcher=Dispatcher(self.store,History())
+        return dispatcher.call('tree_read',{},actor or {'chat_id':'root-chat','turn_id':None,'ui':False}) and dispatcher.pending
+
     def test_chat_names_follow_renumbering_and_keep_user_text(self):
         self.bind(self.a,'a-chat');self.bind(self.b,'b-chat')
-        renamed={}
-        class History:
-            def inspect(inner,chats):
-                return {'root-chat':{'name':'Plan','archived':False},'a-chat':{'name':'[1] A','archived':False},
-                        'b-chat':{'name':'[2] B, my notes','archived':False}}
-            def rename(inner,names):renamed.update(names)
-        dispatcher=Dispatcher(self.store,History())
-        actor={'chat_id':'root-chat','turn_id':None,'ui':True}
-        dispatcher.call('tree_read',{},actor);self.assertEqual(renamed,{})
+        chats={'root-chat':{'title':'Plan','archived':False},'a-chat':{'title':'[1] A','archived':False},
+               'b-chat':{'title':'[2] B, my notes','archived':False}}
+        self.assertEqual(self.sync_with(chats),[])
         with self.store.transaction() as db:db.execute('UPDATE nodes SET position=CASE id WHEN ? THEN 1 ELSE 0 END WHERE parent_id=?',(self.a,self.root))
-        dispatcher.reconciled=None;dispatcher.call('tree_read',{},actor)
-        self.assertEqual(renamed,{'a-chat':'[2] A','b-chat':'[1] B, my notes'})
+        self.assertEqual(self.sync_with(chats),[{'action':'rename','threadId':'a-chat','title':'[2] A'},
+                                                {'action':'rename','threadId':'b-chat','title':'[1] B, my notes'}])
+
+    def test_agent_results_carry_pending_native_actions(self):
+        self.bind(self.a,'a-chat')
+        class History:
+            def inspect(inner, ids):return {c:{'title':'','archived':False} for c in ids}
+        result=Dispatcher(self.store,History()).call('tree_read',{},{'chat_id':'root-chat','turn_id':None,'ui':False})
+        self.assertNotIn('sync',result)
+        handled=Dispatcher(self.store,History()).handle('tools/call',{'name':'tree_read','arguments':{},'_meta':{'x-codex-turn-metadata':{'thread_id':'root-chat','turn_id':'t1'}}})
+        self.assertEqual(handled['structuredContent']['sync'],[{'action':'rename','threadId':'a-chat','title':'[1] A'}])
+
+    def test_completed_item_chat_must_be_archived(self):
+        self.bind(self.a,'a-chat');op=self.op('finish',self.a);self.summary(op,self.a,'a-chat')
+        self.step(op,'delivered');self.step(op,'commit')
+        live={'root-chat':{'title':'Root','archived':False},'a-chat':{'title':'[1] A','archived':False}}
+        self.assertEqual(self.sync_with(live),[{'action':'archive','threadId':'a-chat'}])
+        live['a-chat']['archived']=True
+        self.assertEqual(self.sync_with(live),[]);self.assertEqual(self.node(self.a)['state'],'done')
+        with self.store.connect() as db:self.assertIsNone(db.execute('SELECT 1 FROM chat_sync').fetchone())
+
+    def test_user_archived_root_closes_the_tree_without_summaries(self):
+        self.bind(self.a,'a-chat');self.bind(self.b,'b-chat')
+        deep=self.change(action='add',parent_id=self.a,items=[{'title':'A1'}])['item_ids'][0];self.bind(deep,'a1-chat')
+        with self.store.transaction() as db:db.execute("UPDATE nodes SET state='done',summary='Kept' WHERE id=?",(self.b,))
+        chats={'root-chat':{'title':'Root','archived':True},'a-chat':{'title':'[1] A','archived':False},
+               'b-chat':{'title':'[2] B','archived':True},'a1-chat':{'title':'[1.1] A1','archived':False}}
+        actions=self.sync_with(chats,{'chat_id':'other','turn_id':None,'ui':False})
+        self.assertEqual({n['title']:n['state'] for n in self.store.view('root-chat')['nodes']},
+                         {'Root':'closed','A':'closed','B':'done','A1':'closed'})
+        self.assertEqual(self.node(self.b)['summary'],'Kept')
+        self.assertEqual(sorted(a['threadId'] for a in actions if a['action']=='archive'),['a-chat','a1-chat'])
+        with self.store.connect() as db:
+            self.assertFalse([r for r in db.execute("SELECT 1 FROM operations WHERE stage NOT IN ('done','cancelled')")])
+
+    def test_closing_cancels_pending_creation_but_waits_for_deletion(self):
+        start=self.op('start',self.b)
+        self.store.close_archived(['root-chat'])
+        with self.store.connect() as db:
+            self.assertEqual(db.execute('SELECT stage FROM operations WHERE id=?',(start['id'],)).fetchone()['stage'],'cancelled')
+            self.assertIsNone(db.execute('SELECT 1 FROM locks').fetchone())
+        self.store.hook('root-chat','UserPromptSubmit','t','again')
+        self.bind(self.a,'a-chat');self.op('delete',self.a)
+        self.assertEqual(self.store.close_archived(['root-chat']),[])
+
+    def test_new_turn_under_closed_parents_reopens_the_chain(self):
+        self.bind(self.a,'a-chat')
+        deep=self.change(action='add',parent_id=self.a,items=[{'title':'A1'}])['item_ids'][0];self.bind(deep,'a1-chat')
+        self.store.close_archived(['root-chat'])
+        result=self.store.hook('a1-chat','UserPromptSubmit','t9','Continue here')
+        self.assertTrue(result['reopened'])
+        self.assertEqual({n['title']:n['state'] for n in self.store.view('root-chat')['nodes']},{'Root':'todo','A':'todo','A1':'todo','B':'closed'})
+        chats={'root-chat':{'title':'Root','archived':True},'a-chat':{'title':'[1] A','archived':True},'a1-chat':{'title':'[1.1] A1','archived':False}}
+        self.assertEqual(sorted((a['action'],a['threadId']) for a in self.sync_with(chats)),[('unarchive','a-chat'),('unarchive','root-chat')])
 
     def test_linked_chat_can_browse_another_tree(self):
         other = self.store.apply({'action':'create','title':'Other','items':[{'title':'X'},{'title':'Y'}]}, EVIDENCE, 'other-chat')
@@ -647,7 +699,7 @@ class InheritanceTests(unittest.TestCase):
         def connection():yield call,self.events
         with patch.object(self.history,'connection',connection):
             self.assertEqual(self.history.inspect(['alive','gone','flaky','old']),
-                             {'alive':{'name':'[1] A','archived':False},'gone':None,'old':{'name':'[1] A','archived':True}})
+                             {'alive':{'title':'[1] A','archived':False},'gone':None,'old':{'title':'[1] A','archived':True}})
         self.assertEqual(self.history.inspect([]),{})
 
     def test_fork_inherits_settings_without_parent_history(self):
