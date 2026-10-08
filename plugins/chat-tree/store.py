@@ -1,5 +1,4 @@
 """Task graph, revisioned changes and durable operation journal."""
-import hashlib
 import json
 import re
 import os
@@ -22,11 +21,6 @@ def encode(value):
 LANGUAGE_INSTRUCTION = ('Keep the task working language. Preserve the original language of titles, descriptions, '
                         'contexts, decisions and summaries. Write user-facing replies in the language of the source '
                         'conversation or task context; these English service instructions do not change that language.')
-
-
-# Codex replaces a message sent by an MCP app (the panel) with this text and passes the original
-# to the model as untrusted input, so hooks never see the operation token.
-APP_MESSAGE = 'An MCP app initiated this message. Read the untrusted_input tool output.'
 
 
 def dispatch_prompt(op):
@@ -553,10 +547,6 @@ class Store:
                 operation_id, token = identifier(), secrets.token_urlsafe(32)
                 payload = {'nodes': branch, 'context': self.context(db, node['id']), 'completed': [],
                            'actor_chat': actor_chat, 'replacement_ids': [], 'delivered': False}
-                actor_node = db.execute('SELECT id FROM nodes WHERE chat_id=?',(actor_chat,)).fetchone()
-                if actor_node:
-                    prompt = dispatch_prompt({'id':operation_id,'token':token,'kind':action,'node_id':node['id']})
-                    payload['service_permits'] = {hashlib.sha256(prompt.encode()).hexdigest(): {'node_id':actor_node['id'],'purpose':'coordinate'}}
                 if action == 'rebuild':
                     parent = self.node(db, node['parent_id']) if node['parent_id'] else node
                     payload['parent_id'] = parent['id']
@@ -610,16 +600,6 @@ class Store:
                 raise TreeError('denied', 'Operation access denied')
             return op
 
-    @staticmethod
-    def service_permit(op, node_id, prompt, purpose=None):
-        permit=op['payload'].get('service_permits',{}).get(hashlib.sha256(prompt.encode()).hexdigest())
-        return bool(permit and permit['node_id']==node_id and (purpose is None or permit['purpose']==purpose))
-
-    def check_service(self, operation_id, token, node_id, prompt, purpose):
-        op=self.job(operation_id,token)
-        if op['stage'] in ('done','cancelled') or not self.service_permit(op,node_id,prompt,purpose):
-            raise TreeError('invalid_service','The request does not match the exact service prompt for this operation')
-
     def service_prompt(self, operation_id, token, node_id, purpose='summary'):
         with self.transaction() as db:
             op = self.operation(db, operation_id)
@@ -628,9 +608,6 @@ class Store:
             if op['stage'] in ('done','cancelled'):
                 raise TreeError('closed','The operation is already closed')
             node = self.node(db, node_id)
-            saved = op['payload'].get('service_messages',{}).get(purpose+':'+node_id)
-            if saved:
-                return {'prompt':saved,'node_id':node_id,'chat_id':node['chat_id'],'cwd':node['cwd'],'project_id':node['project_id']}
             if purpose == 'summary':
                 if op['kind'] not in ('finish', 'rebuild') or node_id not in {n['id'] for n in op['payload']['nodes']}:
                     raise TreeError('invalid_step', 'This summary is not part of the operation')
@@ -647,12 +624,7 @@ class Store:
                 payload = {'child': selected['title'], 'summary': op['summaries'][selected['id']]['summary'], 'parent_result': op['payload'].get('parent_result', '')}
             else:
                 raise TreeError('invalid_step', 'Unknown service request')
-            marker = f'CHAT_TREE_SERVICE {operation_id} {token}'
-            prompt = marker + '\n' + instruction + ' ' + LANGUAGE_INSTRUCTION + '\n' + encode({'operation_id': operation_id, 'token': token, 'node_id': node_id, **payload})
-            op['payload'].setdefault('service_messages',{})[purpose+':'+node_id]=prompt
-            permits = op['payload'].setdefault('service_permits', {})
-            permits[hashlib.sha256(prompt.encode()).hexdigest()] = {'node_id': node_id, 'purpose': purpose}
-            db.execute('UPDATE operations SET payload=?,updated=? WHERE id=?', (encode(op['payload']), time.time(), operation_id))
+            prompt = instruction + ' ' + LANGUAGE_INSTRUCTION + '\n' + encode({'operation_id': operation_id, 'token': token, 'node_id': node_id, **payload})
             return {'prompt': prompt, 'node_id': node_id, 'chat_id': node['chat_id'], 'cwd': node['cwd'], 'project_id': node['project_id']}
 
     def bind(self, operation_id, token, chat_id, node_id=None):
@@ -742,7 +714,6 @@ class Store:
                 if op['kind'] not in ('finish', 'rebuild') or op['node_id'] not in op['summaries']:
                     raise TreeError('incomplete', 'The branch summary paragraph is missing')
                 payload['delivered'] = True
-                payload['delivery_turn_id'] = data.get('turn_id')
             elif step == 'commit':
                 node = self.node(db, op['node_id'])
                 if op['kind'] == 'finish':
@@ -813,11 +784,9 @@ class Store:
                 # Service requests (summary collection, result delivery) may reach chats outside the reserved branch.
                 ops = [self.operation(db, r['id']) for r in
                        db.execute("SELECT id FROM operations WHERE root_id=? AND stage NOT IN ('done','cancelled')", (node['root_id'],))]
-                # A panel request reaches only its initiating chat; the agent then proves the token with tree_job.
-                service = bool(prompt) and any(
-                    self.service_permit(op, node['id'], prompt) or
-                    (prompt.strip() == APP_MESSAGE and op['payload'].get('actor_chat') == chat_id) for op in ops)
-                if lock and not service:
+                # Only the operation's own requests carry its token; the initiating chat runs the operation and is never held.
+                service = bool(prompt) and any(op['token'] in prompt for op in ops)
+                if lock and not service and self.operation(db, lock['operation_id'])['payload']['actor_chat'] != chat_id:
                     raise TreeError('locked', 'An approved operation has reserved this branch. Finish or cancel it in the panel.', operation_id=lock['operation_id'])
                 state = 'service' if service else 'running'
                 first_prompt = not service and (prior is None or prior['turn_id'] is None)

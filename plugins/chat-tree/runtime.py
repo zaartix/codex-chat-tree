@@ -188,31 +188,3 @@ class CodexHistory:
             if self._settings(latest_parent) != (settings, instructions) or latest_parent['projectId'] != parent['projectId']:
                 raise RuntimeError('Parent settings changed during creation; inspect the recorded child UUID')
             return {'chat_id': created['id'], 'turn_id': None}
-
-    def user_prompt(self, thread_id, turn_id):
-        data = self.request('thread/read', {'threadId': thread_id, 'includeTurns': True})
-        turn = next((t for t in data['thread'].get('turns', []) if t['id'] == turn_id), None)
-        if turn is None:
-            raise RuntimeError('Current user turn is not available in persisted history')
-        texts = []
-        for item in turn.get('items', []):
-            if item.get('type') == 'userMessage':
-                texts.extend(c.get('text', '') for c in item.get('content', []) if c.get('type') == 'text')
-            elif item.get('type') == 'functionCallOutput' and item.get('namespace') == 'codex_app' and item.get('name') in ('create_thread', 'send_message_to_thread'):
-                delegated = self.delegation(item.get('output', ''))
-                if delegated:
-                    texts.append(delegated['quote'])
-        return '\n'.join(texts)
-
-    @staticmethod
-    def delegation(output):
-        # Exact framing emitted by codex-app-tools; input remains opaque text.
-        prefix = '<codex_delegation>\n  <source_thread_id>'
-        separator = '</source_thread_id>\n  <input>'
-        suffix = '</input>\n</codex_delegation>'
-        if not isinstance(output, str) or not output.startswith(prefix) or not output.endswith(suffix):
-            return None
-        source, found, content = output[len(prefix):-len(suffix)].partition(separator)
-        if not found:
-            return None
-        return {'source_thread_id': source, 'quote': content}

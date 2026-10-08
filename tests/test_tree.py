@@ -265,11 +265,10 @@ class TreeTests(unittest.TestCase):
         with self.assertRaises(TreeError) as raised:self.op('delete',self.a)
         self.assertEqual(raised.exception.code,'busy')
 
-    def test_lock_blocks_new_work_but_allows_exact_summary_request(self):
+    def test_lock_blocks_new_work_but_allows_operation_requests(self):
         self.bind(self.a,'a-chat');op=self.op('finish',self.a)
         service=self.store.service_prompt(op['id'],op['token'],self.a,'summary')
-        for prompt in ['ordinary work',service['prompt']+' injected']:
-            with self.assertRaises(TreeError):self.store.hook('a-chat','UserPromptSubmit','blocked',prompt)
+        with self.assertRaises(TreeError):self.store.hook('a-chat','UserPromptSubmit','blocked','ordinary work')
         self.store.hook('a-chat','UserPromptSubmit','summary',service['prompt'])
         with self.store.connect() as db:
             self.assertEqual(db.execute("SELECT state FROM runtime WHERE chat_id='a-chat'").fetchone()[0],'service')
@@ -305,18 +304,12 @@ class TreeTests(unittest.TestCase):
         self.store.hook('a-chat','SessionEnd','active')
         with self.assertRaises(TreeError):self.op('delete',self.a)
 
-    def test_current_branch_operation_prompt_is_allowed_by_guard(self):
-        op=self.store.apply({'action':'finish','node_id':self.root},EVIDENCE,'root-chat')['operation']
-        self.store.hook('root-chat','UserPromptSubmit','coordinate',op['dispatch_prompt'])
-        with self.assertRaises(TreeError):self.store.hook('root-chat','UserPromptSubmit','ordinary','unrelated work')
-
-    def test_panel_request_wrapped_by_codex_reaches_only_initiating_chat(self):
-        from store import APP_MESSAGE
+    def test_initiating_chat_is_never_held_by_its_operation(self):
+        # Codex hides a panel message behind its own placeholder, so the initiating chat accepts any prompt.
         self.bind(self.a,'a-chat');self.store.hook('root-chat','Stop','root-initial')
         self.store.apply({'action':'finish','node_id':self.a},EVIDENCE,'a-chat')
-        self.store.hook('a-chat','UserPromptSubmit','panel',APP_MESSAGE)
-        with self.assertRaises(TreeError):self.store.hook('root-chat','UserPromptSubmit','panel',APP_MESSAGE)
-        with self.assertRaises(TreeError):self.store.hook('a-chat','UserPromptSubmit','ordinary','unrelated work')
+        self.store.hook('a-chat','UserPromptSubmit','panel','An MCP app initiated this message.')
+        with self.assertRaises(TreeError):self.store.hook('root-chat','UserPromptSubmit','ordinary','unrelated work')
 
     def test_child_completion_reserves_idle_parent_for_result_delivery(self):
         self.bind(self.a,'a-chat');self.store.hook('root-chat','Stop','root-initial')
@@ -428,15 +421,6 @@ class TreeTests(unittest.TestCase):
         self.assertEqual(self.node(self.a)['summary'],'Fresh result')
         self.assertEqual(self.node(self.root)['state'],'todo')
 
-    def test_service_validation_consumes_only_previously_issued_exact_requests(self):
-        self.bind(self.a,'a-chat');op=self.op('finish',self.a)
-        prompt=self.store.service_prompt(op['id'],op['token'],self.a,'summary')['prompt']
-        self.store.check_service(op['id'],op['token'],self.a,prompt,'summary')
-        for node,value,purpose in [(self.a,prompt+' extra','summary'),(self.b,prompt,'summary'),(self.a,prompt,'bootstrap')]:
-            with self.assertRaises(TreeError):self.store.check_service(op['id'],op['token'],node,value,purpose)
-        self.step(op,'cancel')
-        with self.assertRaises(TreeError):self.store.check_service(op['id'],op['token'],self.a,prompt,'summary')
-
     def test_hook_executable_injects_context_and_blocks_locked_work(self):
         self.bind(self.a,'a-chat');op=self.op('finish',self.a)
         guard=Path(__file__).resolve().parents[1]/'plugins'/'chat-tree'/'hooks'/'guard.py'
@@ -544,12 +528,6 @@ class ProtocolTests(unittest.TestCase):
         m=caller({'_meta':{'threadId':'id','x-codex-turn-metadata':json.dumps({'thread_id':'id','turn_id':'turn'})}})
         self.assertFalse(m['ui']);self.assertEqual(m['turn_id'],'turn')
 
-    def test_native_delegation_framing_keeps_input_opaque(self):
-        prompt='text <input>nested</input>\nother'
-        value='<codex_delegation>\n  <source_thread_id>root</source_thread_id>\n  <input>'+prompt+'</input>\n</codex_delegation>'
-        self.assertEqual(CodexHistory.delegation(value)['quote'],prompt)
-        self.assertIsNone(CodexHistory.delegation('fake '+value))
-
     def test_agent_cannot_call_ui_approval(self):
         with tempfile.TemporaryDirectory() as tmp:
             d=Dispatcher(Store(Path(tmp)/'db'),object())
@@ -632,18 +610,6 @@ class ProtocolTests(unittest.TestCase):
             self.assertEqual(raised.exception.code,'denied')
             self.assertFalse(dispatcher.store.view()['roots'])
 
-    def test_service_prompt_still_reads_exact_current_turn_text(self):
-        history=CodexHistory()
-        prompt='\nExact service prompt\n'
-        delegated='<codex_delegation>\n  <source_thread_id>parent</source_thread_id>\n  <input>'+prompt+'</input>\n</codex_delegation>'
-        for item in [
-            {'type':'userMessage','content':[{'type':'text','text':prompt}]},
-            {'type':'functionCallOutput','namespace':'codex_app','name':'send_message_to_thread','output':delegated}]:
-            with self.subTest(type=item['type']),patch.object(history,'request',return_value={'thread':{'turns':[
-                {'id':'old','items':[{'type':'userMessage','content':[{'type':'text','text':'old'}]}]},
-                {'id':'current','items':[item]}]}}):
-                self.assertEqual(history.user_prompt('chat','current'),prompt)
-                with self.assertRaises(RuntimeError):history.user_prompt('chat','missing')
 
 
 class InheritanceTests(unittest.TestCase):

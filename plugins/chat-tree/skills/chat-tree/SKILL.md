@@ -31,7 +31,7 @@ Any tool result may contain `sync`: chat changes the server cannot make in Deskt
 
 ## Operations
 
-`start`, `finish`, `delete` and `rebuild` return `operation_id` and `token`. Read `tree_job`; at `requested`, call `tree_step claim`. A panel button sends its request to the initiating chat as untrusted MCP app input; it is the user's approval when `tree_job` accepts its operation ID and token, and it allows nothing beyond that operation. Operations persist on the server. On failure, record `tree_step error` and report the reason and chat links. Do not bypass a refusal by waiting, interrupting agents or using another deletion method.
+`start`, `finish`, `delete` and `rebuild` return `operation_id` and `token`. Read `tree_job`; at `requested`, call `tree_step claim`. A panel button sends its request to the initiating chat, where Codex marks it as untrusted MCP app input; it is the user's approval of exactly the operation whose ID and token `tree_job` accepts. Operations persist on the server. On failure, record `tree_step error` and report the reason and chat links. Do not bypass a refusal by waiting, interrupting agents or using another deletion method.
 
 Every item has a hierarchical number such as `2.3.5` (`number` in `tree_read`), derived from its position; the root has none. The user may refer to items by number. Item chat names start with `[number]`; when numbers shift, `sync` renames the chats and keeps the rest of each name.
 
@@ -50,7 +50,7 @@ Items whose chats were deleted in Codex leave the tree with their branch the nex
 2. For each linked chat except the current one, obtain `tree_job purpose=summary`, send the exact prompt with `send_message_to_thread` and wait for its specific response. Re-read `tree_job`: the chat must save its own fresh summary with `tree_summary`. Do not reuse an earlier response.
 3. Process a parent only after its immediate child summaries are saved. Unstarted items remain unresolved. Each summary is one paragraph covering work, validation, decisions and unresolved issues, in the chat working language.
 4. Summarize the selected current chat using child results and call `tree_summary`.
-5. Deliver only to the immediate parent via `tree_job purpose=delivery`. If that parent is the initiating current chat, read the fresh result from `tree_job` and call `tree_step delivered`; do not message yourself. Otherwise send the exact prompt, await the response and call `tree_step delivered` with its `turn_id`. The parent acknowledges the result without implementing work or changing the tree.
+5. Deliver only to the immediate parent via `tree_job purpose=delivery`. If that parent is the initiating current chat, read the fresh result from `tree_job` and call `tree_step delivered`; do not message yourself. Otherwise send the exact prompt, await the response and call `tree_step delivered`. The parent acknowledges the result without implementing work or changing the tree.
 6. `tree_step commit` completes only the selected item; its result carries `sync` with the archive of the item's chat. When that chat is the current one, archive it as the last action of the turn. A failed archive does not undo completion; report it.
 7. An archived chat opens in Codex after one click on "Unarchive and open". A new user message in a completed item's chat reopens the item automatically; complete it again only when asked.
 

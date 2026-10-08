@@ -160,24 +160,10 @@ class Dispatcher:
             view = self.store.view(chat_id)
             if not view['current_node_id'] or actor['ui']:
                 raise TreeError('denied', 'Only the agent in a linked chat may save its summary')
-            op = self.store.job(args['operation_id'], args['token'])
-            if chat_id != op['payload']['actor_chat']:
-                self.store.check_service(args['operation_id'],args['token'],view['current_node_id'],
-                                         self.history.user_prompt(chat_id,actor['turn_id']),'summary')
             return self.store.record_summary(args['operation_id'], args['token'], view['current_node_id'], args['summary'], chat_id, actor['turn_id'])
         if name == 'tree_step':
             if actor['ui']:
                 raise TreeError('denied', 'Only the initiating chat agent may advance operation steps')
-            if args['step'] == 'delivered':
-                op = self.store.job(args['operation_id'], args['token'])
-                node = self.store.view(chat_id, op['node_id'])['nodes']
-                selected = next(n for n in node if n['id'] == op['node_id'])
-                if not selected['parent_id']:
-                    raise TreeError('invalid_step', 'The root task has no parent')
-                parent = next(n for n in node if n['id'] == selected['parent_id'])
-                if parent['chat_id'] != chat_id:
-                    prompt = self.history.user_prompt(parent['chat_id'], (args.get('data') or {}).get('turn_id'))
-                    self.store.check_service(args['operation_id'],args['token'],parent['id'],prompt,'delivery')
             return self.store.advance(args['operation_id'], args['token'], args['step'], args.get('data'), chat_id)
         if name == 'tree_delete_saved_chat':
             op = self.store.job(args['operation_id'], args['token'])
@@ -190,9 +176,6 @@ class Dispatcher:
                 return op
             with self.store.connect() as db:
                 self.store._idle(db, [node], chat_id)
-                lock = db.execute('SELECT operation_id FROM locks WHERE node_id=?', (node['id'],)).fetchone()
-                if not lock or lock['operation_id'] != op['id']:
-                    raise TreeError('denied', 'The branch has not been reserved')
             self.history.request('thread/delete', {'threadId': node['chat_id']})
             return self.store.advance(op['id'], args['token'], 'deleted', {'node_id': node['id']}, chat_id)
         raise TreeError('unknown_tool', 'Unknown tool')
