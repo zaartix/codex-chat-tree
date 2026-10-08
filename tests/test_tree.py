@@ -318,6 +318,25 @@ class TreeTests(unittest.TestCase):
         for kind in ['delete','rebuild']:
             with self.assertRaises(TreeError):self.op(kind,self.root)
 
+    def test_new_turn_in_completed_item_reopens_it(self):
+        self.bind(self.a,'a-chat');op=self.op('finish',self.a);self.summary(op,self.a,'a-chat')
+        self.step(op,'delivered');self.step(op,'commit')
+        self.assertEqual(self.node(self.a)['state'],'done')
+        result=self.store.hook('a-chat','UserPromptSubmit','t2','One more fix')
+        self.assertTrue(result['reopened']);self.assertEqual(self.node(self.a)['state'],'todo')
+        self.assertEqual(self.node(self.a)['summary'],'Fresh result')
+        self.assertFalse(self.store.hook('a-chat','UserPromptSubmit','t3','Again')['reopened'])
+
+    def test_result_delivery_to_completed_parent_keeps_it_done(self):
+        self.bind(self.a,'a-chat')
+        deep=self.change(action='add',parent_id=self.a,items=[{'title':'A1'}])['item_ids'][0]
+        self.bind(deep,'a1-chat')
+        with self.store.transaction() as db:db.execute("UPDATE nodes SET state='done' WHERE id=?",(self.a,))
+        op=self.op('finish',deep);self.summary(op,deep,'a1-chat')
+        delivery=self.store.service_prompt(op['id'],op['token'],self.a,'delivery')['prompt']
+        self.assertFalse(self.store.hook('a-chat','UserPromptSubmit','d1',delivery)['reopened'])
+        self.assertEqual(self.node(self.a)['state'],'done')
+
     def test_explicit_reopen_preserves_previous_result_and_parent_state(self):
         self.bind(self.a,'a-chat');op=self.op('finish',self.a);self.summary(op,self.a,'a-chat')
         self.step(op,'delivered');self.step(op,'commit')

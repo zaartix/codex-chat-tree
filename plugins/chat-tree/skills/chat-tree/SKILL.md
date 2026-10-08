@@ -44,7 +44,8 @@ Items whose chats were deleted in Codex leave the tree with their branch the nex
 3. Process a parent only after its immediate child summaries are saved. Unstarted items remain unresolved. Each summary is one paragraph covering work, validation, decisions and unresolved issues, in the chat working language.
 4. Summarize the selected current chat using child results and call `tree_summary`.
 5. Deliver only to the immediate parent via `tree_job purpose=delivery`. If that parent is the initiating current chat, read the fresh result from `tree_job` and call `tree_step delivered`; do not message yourself. Otherwise send the exact prompt, await the response and call `tree_step delivered` with its `turn_id`. The parent acknowledges the result without implementing work or changing the tree.
-6. `tree_step commit` completes only the selected item. Chats remain available.
+6. `tree_step commit` completes only the selected item. Then archive the selected item's chat with `set_thread_archived`: a completed item is an archived chat. When that chat is the current one, archive it as the last action of the turn. A failed archive does not undo completion; report it.
+7. An archived chat opens in Codex after one click on "Unarchive and open". A new user message in a completed item's chat reopens the item automatically; complete it again only when asked.
 
 ### Delete and rebuild
 

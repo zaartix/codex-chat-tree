@@ -677,18 +677,26 @@ class Store:
             node = db.execute('SELECT * FROM nodes WHERE chat_id=?', (chat_id,)).fetchone()
             if not node:
                 return None
-            first_prompt = False
+            first_prompt = reopened = False
             if event == 'UserPromptSubmit':
                 prior = db.execute('SELECT turn_id FROM runtime WHERE chat_id=?', (chat_id,)).fetchone()
                 lock = db.execute('SELECT operation_id FROM locks WHERE node_id=?', (node['id'],)).fetchone()
-                service = False
-                if lock and prompt:
-                    operation = self.operation(db, lock['operation_id'])
-                    service = self.service_permit(operation,node['id'],prompt)
+                # Service requests (summary collection, result delivery) may reach chats outside the reserved branch.
+                service = bool(prompt) and any(
+                    self.service_permit(self.operation(db, r['id']), node['id'], prompt)
+                    for r in db.execute("SELECT id FROM operations WHERE root_id=? AND stage NOT IN ('done','cancelled')", (node['root_id'],)))
                 if lock and not service:
                     raise TreeError('locked', 'An approved operation has reserved this branch. Finish or cancel it in the panel.', operation_id=lock['operation_id'])
                 state = 'service' if service else 'running'
                 first_prompt = not service and (prior is None or prior['turn_id'] is None)
+                # A completed item's chat is archived; new work in it means the item is no longer done.
+                if not service and node['state'] == 'done':
+                    db.execute("UPDATE nodes SET state='todo' WHERE id=?", (node['id'],))
+                    self._touch(db, dict(node))
+                    db.execute('INSERT INTO audit(action,evidence,payload,created) VALUES(?,?,?,?)',
+                               ('reopen_on_new_turn', encode({'source': 'user_prompt_hook', 'chat_id': chat_id, 'turn_id': turn_id}),
+                                encode({'node_id': node['id']}), time.time()))
+                    reopened = True
                 db.execute('''INSERT INTO runtime VALUES(?,?,?,?,1,?) ON CONFLICT(chat_id) DO UPDATE SET
                               state=excluded.state,turn_id=excluded.turn_id,prompt=excluded.prompt,hook_seen=1,updated=excluded.updated''',
                            (chat_id, state, turn_id, prompt, time.time()))
@@ -700,4 +708,4 @@ class Store:
                 db.execute('''INSERT INTO runtime VALUES(?,?,?,NULL,1,?) ON CONFLICT(chat_id) DO UPDATE SET
                               state=excluded.state,prompt=NULL,hook_seen=1,updated=excluded.updated''',
                            (chat_id, 'idle' if event == 'Stop' or (event=='SessionEnd' and row and row['state']=='idle') else 'unknown', turn_id, time.time()))
-            return {**dict(node), 'first_prompt': first_prompt}
+            return {**dict(node), 'first_prompt': first_prompt, 'reopened': reopened}

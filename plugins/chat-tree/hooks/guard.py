@@ -41,6 +41,9 @@ def main():
                'saved_decisions': next(n for n in view['nodes'] if n['id']==node['id'])['results'], 'stale': bool(node['stale'])}
     first = ('This is the first message in this branch chat: call tree_panel once so the user sees the branch, then handle the message. '
              if node.get('first_prompt') else '')
+    if node.get('reopened'):
+        first += ('This item was completed and its chat archived; this message reopened it. Tell the user once that the item '
+                  'is open again and will be completed again when they ask. ')
     print(json.dumps({'hookSpecificOutput': {'hookEventName': 'UserPromptSubmit',
            'additionalContext': 'Chat Tree: current context of the linked branch. Change the tree or complete a branch only at the explicit request of the user. Use the chat-tree skill for operations. ' + first + LANGUAGE_INSTRUCTION + '\n' + json.dumps(context, ensure_ascii=False)}}))
 

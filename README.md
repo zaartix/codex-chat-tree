@@ -30,7 +30,7 @@ Without the installer: `codex plugin marketplace add zaartix/codex-chat-tree`, `
 1. Discuss a plan with the agent, then say **"Create a Chat Tree from our plan."**
 2. Click **Start** on an item. A new chat opens in about a second with the parent's project, model, reasoning, permissions and other settings. Your first message there receives the item's context.
 3. Work in the item chat. It shows a quiet link to its parent and its own checklist, which can be broken down further in the same way.
-4. When the item is done, tell the agent or click **Complete**. Summaries are collected bottom-up and the result is delivered only to the immediate parent.
+4. When the item is done, tell the agent or click **Complete**. Summaries are collected bottom-up, the result is delivered only to the immediate parent, and the item's chat is archived: done means archived. Open it again with one click on **Unarchive and open**; a new message there reopens the item.
 
 The panel is for navigation and completion. Creating, adding, editing, rebuilding and deleting items always goes through the agent, and tree changes happen only on your explicit request or approval. Built-in texts are English; your task data and the chats stay in your language.
 
