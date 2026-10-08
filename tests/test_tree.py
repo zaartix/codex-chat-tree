@@ -310,6 +310,14 @@ class TreeTests(unittest.TestCase):
         self.store.hook('root-chat','UserPromptSubmit','coordinate',op['dispatch_prompt'])
         with self.assertRaises(TreeError):self.store.hook('root-chat','UserPromptSubmit','ordinary','unrelated work')
 
+    def test_panel_request_wrapped_by_codex_reaches_only_initiating_chat(self):
+        from store import APP_MESSAGE
+        self.bind(self.a,'a-chat');self.store.hook('root-chat','Stop','root-initial')
+        self.store.apply({'action':'finish','node_id':self.a},EVIDENCE,'a-chat')
+        self.store.hook('a-chat','UserPromptSubmit','panel',APP_MESSAGE)
+        with self.assertRaises(TreeError):self.store.hook('root-chat','UserPromptSubmit','panel',APP_MESSAGE)
+        with self.assertRaises(TreeError):self.store.hook('a-chat','UserPromptSubmit','ordinary','unrelated work')
+
     def test_child_completion_reserves_idle_parent_for_result_delivery(self):
         self.bind(self.a,'a-chat');self.store.hook('root-chat','Stop','root-initial')
         op=self.store.apply({'action':'finish','node_id':self.a},EVIDENCE,'a-chat')['operation']

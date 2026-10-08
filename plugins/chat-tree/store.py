@@ -24,6 +24,11 @@ LANGUAGE_INSTRUCTION = ('Keep the task working language. Preserve the original l
                         'conversation or task context; these English service instructions do not change that language.')
 
 
+# Codex replaces a message sent by an MCP app (the panel) with this text and passes the original
+# to the model as untrusted input, so hooks never see the operation token.
+APP_MESSAGE = 'An MCP app initiated this message. Read the untrusted_input tool output.'
+
+
 def dispatch_prompt(op):
     return ('The user approved this Chat Tree operation in the panel: '+op['kind']+'. Use the chat-tree skill. '
             'Perform only the approved operation without implementing the task. Start with tree_job; at requested, call tree_step claim. '
@@ -806,9 +811,12 @@ class Store:
                 prior = db.execute('SELECT turn_id FROM runtime WHERE chat_id=?', (chat_id,)).fetchone()
                 lock = db.execute('SELECT operation_id FROM locks WHERE node_id=?', (node['id'],)).fetchone()
                 # Service requests (summary collection, result delivery) may reach chats outside the reserved branch.
+                ops = [self.operation(db, r['id']) for r in
+                       db.execute("SELECT id FROM operations WHERE root_id=? AND stage NOT IN ('done','cancelled')", (node['root_id'],))]
+                # A panel request reaches only its initiating chat; the agent then proves the token with tree_job.
                 service = bool(prompt) and any(
-                    self.service_permit(self.operation(db, r['id']), node['id'], prompt)
-                    for r in db.execute("SELECT id FROM operations WHERE root_id=? AND stage NOT IN ('done','cancelled')", (node['root_id'],)))
+                    self.service_permit(op, node['id'], prompt) or
+                    (prompt.strip() == APP_MESSAGE and op['payload'].get('actor_chat') == chat_id) for op in ops)
                 if lock and not service:
                     raise TreeError('locked', 'An approved operation has reserved this branch. Finish or cancel it in the panel.', operation_id=lock['operation_id'])
                 state = 'service' if service else 'running'
