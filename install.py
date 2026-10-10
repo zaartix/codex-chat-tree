@@ -80,19 +80,6 @@ class AppServer:
         self.process.terminate()
 
 
-def codex_home():
-    return Path(os.environ.get('CODEX_HOME') or Path.home() / '.codex')
-
-
-def keep_previous(path, previous):
-    # A running Codex keeps calling hooks at the version path it loaded. Without the file a Stop hook fails
-    # with exit code 2, which Codex treats as "continue the turn", so the turn would repeat until restart.
-    for name in previous:
-        old = path.parent / name
-        if not old.exists() and not old.is_symlink():
-            old.symlink_to(path.name)
-
-
 def ask(question):
     try:
         with open('/dev/tty') as tty:
@@ -139,9 +126,6 @@ def main():
     local = here if here and (here / '.agents' / 'plugins' / 'marketplace.json').is_file() else None
     current = configured_source()
     if '--uninstall' in sys.argv:
-        # A running Codex would keep calling the removed hooks, and a missing Stop hook repeats the turn.
-        if subprocess.run(['pgrep', '-f', r'/(ChatGPT|Codex)\.app/Contents/MacOS/'], capture_output=True).returncode == 0:
-            fail('Quit Codex first, then run the uninstaller again.')
         codex('plugin', 'remove', PLUGIN, '--json', check=False)
         if current is not None:
             codex('plugin', 'marketplace', 'remove', MARKETPLACE)
@@ -156,12 +140,8 @@ def main():
         codex('plugin', 'marketplace', 'add', wanted, '--json')
     elif not local:
         codex('plugin', 'marketplace', 'upgrade', MARKETPLACE)
-    cache = codex_home() / 'plugins' / 'cache' / MARKETPLACE / PLUGIN.split('@')[0]
-    previous = [p.name for p in cache.iterdir()] if cache.is_dir() else []
     installed = json.loads(codex('plugin', 'add', PLUGIN, '--json'))
-    path = Path(installed['installedPath'])
-    keep_previous(path, previous)
-    version = json.loads((path / '.codex-plugin' / 'plugin.json').read_text())['version']
+    version = json.loads((Path(installed['installedPath']) / '.codex-plugin' / 'plugin.json').read_text())['version']
     print('Chat Tree ' + version + ' installed from ' + ('this checkout' if local else 'GitHub') + '.')
     review_hooks()
     print('Restart Codex to load the new version.')

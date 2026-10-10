@@ -444,14 +444,15 @@ class TreeTests(unittest.TestCase):
         self.assertEqual(code('not json'),1)
         self.assertEqual(code(json.dumps({'session_id':{'bad':1},'hook_event_name':'Stop'})),0)
 
-    def test_installer_keeps_previous_version_paths_for_running_codex(self):
-        sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
-        import install
-        with tempfile.TemporaryDirectory() as tmp:
-            new=Path(tmp)/'0.2.1';(new/'hooks').mkdir(parents=True);(new/'hooks'/'guard.py').write_text('')
-            install.keep_previous(new,['0.2.0','0.2.1'])
-            self.assertTrue((Path(tmp)/'0.2.0'/'hooks'/'guard.py').is_file())
-            self.assertEqual(os.readlink(Path(tmp)/'0.2.0'),'0.2.1')
+    def test_hook_command_is_silent_when_the_plugin_is_gone(self):
+        # A running Codex keeps the hook path it loaded; after an update or removal the file is gone,
+        # and python3 would fail with exit code 2, which repeats the turn after Stop.
+        hooks=json.loads((Path(__file__).resolve().parents[1]/'plugins'/'chat-tree'/'hooks'/'hooks.json').read_text())['hooks']
+        command=hooks['Stop'][0]['hooks'][0]['command']
+        stop=json.dumps({'session_id':'a-chat','hook_event_name':'Stop'})
+        for root in ('/missing-plugin',str(Path(__file__).resolve().parents[1]/'plugins'/'chat-tree')):
+            r=subprocess.run(['sh','-c',command],input=stop,text=True,capture_output=True,env={**os.environ,'PLUGIN_ROOT':root,'CHAT_TREE_DB':str(self.store.path)},timeout=5)
+            self.assertEqual(r.returncode,0,r.stderr)
 
     def test_internal_subagent_hook_cannot_release_main_chat(self):
         self.bind(self.a,'a-chat');self.store.observe_turn('a-chat','main')
@@ -877,7 +878,7 @@ class ReleaseTests(unittest.TestCase):
         self.assertEqual((mcp['command'],mcp['args'],mcp['cwd']),('python3',['./server.py'],'.'))
         hooks=json.loads((plugin/'hooks'/'hooks.json').read_text())['hooks']
         commands={h['command'] for groups in hooks.values() for g in groups for h in g['hooks']}
-        self.assertEqual(commands,{'python3 "${PLUGIN_ROOT}/hooks/guard.py"'})
+        self.assertEqual(len(commands),1);self.assertIn('"${PLUGIN_ROOT}/hooks/guard.py"',commands.pop())
 
 
 if __name__=='__main__':unittest.main()

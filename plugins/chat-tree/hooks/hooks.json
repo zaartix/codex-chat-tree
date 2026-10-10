@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"${PLUGIN_ROOT}/hooks/guard.py\"",
+            "command": "python3 -c \"import os,runpy,sys; p=sys.argv[1]; os.path.isfile(p) or sys.exit(0); sys.argv=[p]; runpy.run_path(p,run_name='__main__')\" \"${PLUGIN_ROOT}/hooks/guard.py\"",
             "statusMessage": "Chat Tree: load branch context",
             "timeout": 10
           }
@@ -18,7 +18,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"${PLUGIN_ROOT}/hooks/guard.py\"",
+            "command": "python3 -c \"import os,runpy,sys; p=sys.argv[1]; os.path.isfile(p) or sys.exit(0); sys.argv=[p]; runpy.run_path(p,run_name='__main__')\" \"${PLUGIN_ROOT}/hooks/guard.py\"",
             "statusMessage": "Chat Tree: mark chat idle",
             "timeout": 10
           }
@@ -30,7 +30,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"${PLUGIN_ROOT}/hooks/guard.py\"",
+            "command": "python3 -c \"import os,runpy,sys; p=sys.argv[1]; os.path.isfile(p) or sys.exit(0); sys.argv=[p]; runpy.run_path(p,run_name='__main__')\" \"${PLUGIN_ROOT}/hooks/guard.py\"",
             "statusMessage": "Chat Tree: record interruption",
             "timeout": 3
           }
@@ -42,7 +42,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"${PLUGIN_ROOT}/hooks/guard.py\"",
+            "command": "python3 -c \"import os,runpy,sys; p=sys.argv[1]; os.path.isfile(p) or sys.exit(0); sys.argv=[p]; runpy.run_path(p,run_name='__main__')\" \"${PLUGIN_ROOT}/hooks/guard.py\"",
             "statusMessage": "Chat Tree: close chat session",
             "timeout": 3
           }
