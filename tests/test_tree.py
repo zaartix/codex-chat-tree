@@ -676,6 +676,28 @@ class InheritanceTests(unittest.TestCase):
                              {'alive':{'title':'[1] A','archived':False},'gone':None,'old':{'title':'[1] A','archived':True}})
         self.assertEqual(self.history.inspect([]),{})
 
+    def test_partial_settings_snapshot_keeps_earlier_fields(self):
+        # Resuming a chat writes a snapshot without reasoning_summary; that field is not reset.
+        partial={k:v for k,v in self.settings.items() if k!='reasoning_summary'}
+        self.write(self.parent,self.settings,extra=[{'type':'event_msg','payload':{'type':'thread_settings_applied','thread_settings':partial}}])
+        self.assertEqual(CodexHistory._settings(self.parent)[0],self.settings)
+
+    def test_opening_turn_shows_the_card_and_hides_its_instructions(self):
+        events=queue.Queue()
+        events.put({'method':'turn/completed','params':{'threadId':'other','turn':{'id':'x'}}})
+        events.put({'method':'turn/completed','params':{'threadId':'new-chat','turn':{'id':'opening-turn'}}})
+        def call(identifier,method,params):
+            self.calls.append((method,params))
+            return {'turn':{'id':'opening-turn'}} if method=='turn/start' else {}
+        @contextmanager
+        def connection():yield call,events
+        with patch.object(self.history,'connection',connection):
+            self.assertEqual(self.history.open('new-chat','[1.2] Item\n\nDescription','Show the panel'),'opening-turn')
+        self.assertEqual([m for m,p in self.calls],['thread/resume','thread/inject_items','turn/start'])
+        inject,start=self.calls[1][1],self.calls[2][1]
+        self.assertEqual((inject['items'][0]['role'],inject['items'][0]['content'][0]['text']),('developer','Show the panel'))
+        self.assertEqual(start['input'],[{'type':'text','text':'[1.2] Item\n\nDescription'}])
+
     def test_fork_inherits_settings_without_parent_history(self):
         result=self.run_create()
         fork=next(params for method,params in self.calls if method=='thread/fork')
@@ -766,20 +788,22 @@ class InheritanceTests(unittest.TestCase):
         store.advance(op['id'],op['token'],'claim',actor_chat='root-chat')
         class History:
             def create(inner,parent_chat_id,saved,title=None,reserve=None):
-                self.assertEqual(parent_chat_id,'a-chat')
+                self.assertEqual(parent_chat_id,'a-chat');self.assertEqual(title,'[1.1] Deep')
                 reserve()
                 saved('deep-chat')
                 return {'chat_id':'deep-chat','turn_id':None}
+            def open(inner,chat_id,text,instructions):
+                # The opening turn runs only after the chat is bound, so the prompt hook does not hold it.
+                self.assertEqual(store.view(chat_id)['current_node_id'],deep)
+                store.hook(chat_id,'UserPromptSubmit','opening',text);store.hook(chat_id,'Stop','opening')
+                opened.append(text);return 'opening'
             def hooks_trusted(inner):return True
+        opened=[]
         result=Dispatcher(store,History()).call('tree_create_saved_chat',{'operation_id':op['id'],'token':op['token'],'node_id':deep},{'chat_id':'root-chat','turn_id':'current','ui':False})
-        self.assertEqual(result['chat_id'],'deep-chat')
+        self.assertEqual((result['chat_id'],result['turn_id'],opened),('deep-chat','opening',['[1.1] Deep']))
         view=store.view('deep-chat')
         self.assertEqual(view['current_node_id'],deep);self.assertFalse(view['operations'])
         self.assertEqual({k:v for k,v in next(n for n in view['nodes'] if n['id']==deep)['runtime'].items() if k!='updated'},{'chat_id':'deep-chat','state':'idle','hook_seen':1})
-        # The first user prompt is flagged so the hook asks the agent to show the panel; later prompts are not.
-        self.assertTrue(store.hook('deep-chat','UserPromptSubmit','first','Start work')['first_prompt'])
-        store.hook('deep-chat','Stop','first')
-        self.assertFalse(store.hook('deep-chat','UserPromptSubmit','second','Continue')['first_prompt'])
 
     def test_untrusted_hooks_leave_new_chat_state_unknown(self):
         store=Store(Path(self.cwd)/'tree.db')
@@ -788,6 +812,7 @@ class InheritanceTests(unittest.TestCase):
         class History:
             def create(inner,parent_chat_id,saved,title=None,reserve=None):
                 reserve();saved('a-chat');return {'chat_id':'a-chat','turn_id':None}
+            def open(inner,chat_id,text,instructions):raise RuntimeError('no opening')
             def hooks_trusted(inner):return False
         Dispatcher(store,History()).call('tree_create_saved_chat',{'operation_id':op['id'],'token':op['token'],'node_id':root['item_ids'][0]},{'chat_id':'root-chat','turn_id':None,'ui':True})
         node=next(n for n in store.view('root-chat')['nodes'] if n['chat_id']=='a-chat')

@@ -15,6 +15,9 @@ VERSION = json.loads((ROOT / '.codex-plugin' / 'plugin.json').read_text())['vers
 # A new URI per release makes hosts load the released panel.
 UI_URI = 'ui://chat-tree/v' + VERSION + '/tree.html'
 RECONCILE_SECONDS = 10
+OPENING = ('Chat Tree opened this item chat. The next user message is the card of this item, not a request to work. '
+           'Call tree_panel once so the user sees this item and its parent, then reply with one short line in the language '
+           'of the item saying the chat is ready for this item. Do not start the task, read files or change the tree.')
 
 
 def caller(params):
@@ -140,10 +143,9 @@ class Dispatcher:
                 with self.store.connect() as db:
                     node = self.store.node(db, args['node_id'])
                     parent = self.store.node(db, node['parent_id'])
-                # A persistent fork is saved without a turn. No model turn runs: the server binds the chat it created,
-                # and the prompt hook delivers the branch context with the user's first message.
+                title = self.store.chat_title(node['id'])
                 created = self.history.create(parent['chat_id'],
-                    lambda uuid: self.store.created(args['operation_id'], args['token'], args['node_id'], uuid), title=self.store.chat_title(node['id']),
+                    lambda uuid: self.store.created(args['operation_id'], args['token'], args['node_id'], uuid), title=title,
                     reserve=lambda: self.store.reserve_creation(args['operation_id'], args['token'], args['node_id'], chat_id))
                 self.store.bind(args['operation_id'], args['token'], created['chat_id'], args['node_id'])
                 try:
@@ -152,6 +154,13 @@ class Dispatcher:
                     trusted = False
                 if trusted:
                     self.store.fresh_chat(created['chat_id'])
+                # Desktop shows only turns, so once the chat is bound one short opening turn presents the item:
+                # its card is the user message and the agent answers with the panel of this item.
+                card = '\n\n'.join(part for part in (title, node['description']) if part)
+                try:
+                    created['turn_id'] = self.history.open(created['chat_id'], card, OPENING)
+                except Exception:
+                    pass  # The chat is created and bound; it only opens without the card.
                 return {**created, 'node_id': node['id'], 'title': node['title'], 'url': 'codex://threads/'+created['chat_id']}
             except Exception as error:
                 self.store.advance(args['operation_id'], args['token'], 'error', {'message': str(error)}, chat_id)

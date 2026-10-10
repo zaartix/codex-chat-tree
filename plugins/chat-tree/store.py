@@ -777,9 +777,8 @@ class Store:
             node = db.execute('SELECT * FROM nodes WHERE chat_id=?', (chat_id,)).fetchone()
             if not node:
                 return None
-            first_prompt = reopened = False
+            reopened = False
             if event == 'UserPromptSubmit':
-                prior = db.execute('SELECT turn_id FROM runtime WHERE chat_id=?', (chat_id,)).fetchone()
                 lock = db.execute('SELECT operation_id FROM locks WHERE node_id=?', (node['id'],)).fetchone()
                 # Service requests (summary collection, result delivery) may reach chats outside the reserved branch.
                 ops = [self.operation(db, r['id']) for r in
@@ -789,7 +788,6 @@ class Store:
                 if lock and not service and self.operation(db, lock['operation_id'])['payload']['actor_chat'] != chat_id:
                     raise TreeError('locked', 'An approved operation has reserved this branch. Finish or cancel it in the panel.', operation_id=lock['operation_id'])
                 state = 'service' if service else 'running'
-                first_prompt = not service and (prior is None or prior['turn_id'] is None)
                 # A finished item's chat is archived; new work in it reopens the item and every finished ancestor,
                 # so an open item never sits under a closed parent.
                 if not service and node['state'] in ('done', 'closed'):
@@ -813,4 +811,4 @@ class Store:
                 db.execute('''INSERT INTO runtime VALUES(?,?,?,NULL,1,?) ON CONFLICT(chat_id) DO UPDATE SET
                               state=excluded.state,prompt=NULL,hook_seen=1,updated=excluded.updated''',
                            (chat_id, 'idle' if event == 'Stop' or (event=='SessionEnd' and row and row['state']=='idle') else 'unknown', turn_id, time.time()))
-            return {**dict(node), 'first_prompt': first_prompt, 'reopened': reopened}
+            return {**dict(node), 'reopened': reopened}

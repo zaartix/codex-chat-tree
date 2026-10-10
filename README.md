@@ -28,7 +28,7 @@ Without the installer: `codex plugin marketplace add zaartix/codex-chat-tree`, `
 ## Use
 
 1. Discuss a plan with the agent, then say **"Create a Chat Tree from our plan."**
-2. Click **Start** on an item. A new chat opens in about a second with the parent's project, model, reasoning, permissions and other settings. Your first message there receives the item's context.
+2. Click **Start** on an item. In about ten seconds a new chat opens with the parent's project, model, reasoning, permissions and other settings. It starts with the item card and a panel of that item with a link back to its parent; every message there receives the item's context.
 3. Work in the item chat. It shows a quiet link to its parent and its own checklist, which can be broken down further in the same way.
 4. When the item is done, tell the agent or click **Complete**. Summaries are collected bottom-up, the result is delivered only to the immediate parent, and the item's chat is archived: done means archived. Open it again with one click on **Unarchive and open**; a new message there reopens the item.
 
@@ -38,7 +38,7 @@ To use your own phrase for it, add a rule to your AGENTS.md, for example: `When 
 
 ## How it works
 
-- **Chats.** The server forks the parent chat before its first turn (`thread/fork`), verifies that every setting was inherited and binds the new chat to the item. No model turn runs. If inheritance cannot be verified, creation stops with an error.
+- **Chats.** The server forks the parent chat before its first turn (`thread/fork`), verifies that every setting was inherited and binds the new chat to the item. If inheritance cannot be verified, creation stops with an error. Codex Desktop shows only turns, so one short opening turn then presents the item: the item card is its message and the agent shows the item panel without starting the task.
 - **Hooks.** `UserPromptSubmit` adds the branch context to each message; `Stop`, `Interrupt` and `SessionEnd` record whether a chat is busy. A busy or unknown chat blocks completion, rebuilding and deletion.
 - **Data.** Trees are stored in `$CODEX_HOME/chat-tree/tree.sqlite3` (default `~/.codex/chat-tree/`) and survive updates and removal. Older data is not migrated: an incompatible database is reported as an error.
 - **Archived chats.** A completed item is an archived chat. Archiving an item chat yourself closes that branch without summaries (shown as *Closed*), and a new message in a completed or closed chat reopens it with its ancestors. Desktop only lets its own agent archive, unarchive or rename open chats, so the server lists these changes as `sync` and the agent applies them with native tools on its next Chat Tree call.

@@ -39,8 +39,7 @@ def main():
     context = {'node_id': node['id'], 'root_id': node['root_id'], 'title': node['title'],
                'context_chain': view['contexts'], 'direct_child_results': children,
                'saved_decisions': next(n for n in view['nodes'] if n['id']==node['id'])['results'], 'stale': bool(node['stale'])}
-    first = ('This is the first message in this branch chat: call tree_panel once so the user sees the branch, then handle the message. '
-             if node.get('first_prompt') else '')
+    first = ''
     if node.get('reopened'):
         first += ('This item was completed and its chat archived; this message reopened it. Tell the user once that the item '
                   'is open again and will be completed again when they ask. ')

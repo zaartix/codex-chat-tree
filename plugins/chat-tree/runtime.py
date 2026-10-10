@@ -126,7 +126,9 @@ class CodexHistory:
                 if item['type'] == 'session_meta' and payload['id'] == thread['id']:
                     meta = payload
                 elif item['type'] == 'event_msg' and payload.get('type') == 'thread_settings_applied':
-                    settings = dict(payload['thread_settings'])
+                    # A later snapshot may omit a field (resuming a chat writes one without reasoning_summary);
+                    # an omitted field keeps its earlier value.
+                    settings = {**(settings or {}), **payload['thread_settings']}
                 elif item['type'] == 'turn_context' and settings is not None:
                     settings.update({target: payload[source] for source, target in context_fields.items() if source in payload})
         required = {'cwd', 'model', 'model_provider_id', 'reasoning_effort', 'reasoning_summary',
@@ -188,3 +190,30 @@ class CodexHistory:
             if self._settings(latest_parent) != (settings, instructions) or latest_parent['projectId'] != parent['projectId']:
                 raise RuntimeError('Parent settings changed during creation; inspect the recorded child UUID')
             return {'chat_id': created['id'], 'turn_id': None}
+
+    def open(self, chat_id, text, instructions):
+        """Run one opening turn in a new chat that Desktop has not opened yet; Desktop shows only turns.
+
+        `text` is the user message the chat shows; `instructions` reach the model as history the user does not see.
+        Returns the turn ID, or None when the turn could not start. A failure leaves the chat usable.
+        """
+        with self.connection() as (call, messages):
+            try:
+                call(2, 'thread/resume', {'threadId': chat_id})
+                call(3, 'thread/inject_items', {'threadId': chat_id, 'items': [
+                    {'type': 'message', 'role': 'developer', 'content': [{'type': 'input_text', 'text': instructions}]}]})
+                turn_id = call(4, 'turn/start', {'threadId': chat_id, 'input': [{'type': 'text', 'text': text}]})['turn']['id']
+            except RuntimeError:
+                return None
+            deadline = time.monotonic() + 90
+            try:
+                while True:
+                    event = self._next_event(messages, deadline, 'opening turn')
+                    if event.get('method') == 'turn/completed' and event.get('params', {}).get('threadId') == chat_id:
+                        return turn_id
+            except RuntimeError:
+                try:
+                    call(5, 'turn/interrupt', {'threadId': chat_id, 'turnId': turn_id})
+                except RuntimeError:
+                    pass
+                return turn_id
