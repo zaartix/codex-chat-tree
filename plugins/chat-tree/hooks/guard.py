@@ -8,11 +8,15 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from store import Store, TreeError, data_path, LANGUAGE_INSTRUCTION
 
 
+EVENT = {}
+
+
 def main():
     if not data_path().exists():
         print('{}')
         return
     event = json.load(sys.stdin)
+    EVENT.update(event)
     # Codex supplies the parent session_id to internal subagent hooks.
     # Their lifecycle must not overwrite the linked main chat's lifecycle.
     if event.get('agent_id'):
@@ -58,4 +62,6 @@ if __name__ == '__main__':
         print(json.dumps({'decision': 'block', 'reason': str(error)}, ensure_ascii=False))
     except Exception as error:
         print('Chat Tree guard: ' + str(error), file=sys.stderr)
-        sys.exit(2)
+        # Exit code 2 blocks a prompt, which keeps an unverified branch safe. After a Stop hook it would make
+        # Codex continue the turn and call the hook again, so every other event fails without blocking.
+        sys.exit(2 if EVENT.get('hook_event_name') == 'UserPromptSubmit' else 1)

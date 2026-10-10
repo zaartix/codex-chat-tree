@@ -434,6 +434,25 @@ class TreeTests(unittest.TestCase):
         self.assertEqual(result['hookEventName'],'UserPromptSubmit')
         self.assertIn('Personal A',result['additionalContext']);self.assertIn('Shared',result['additionalContext'])
 
+    def test_hook_failure_blocks_only_prompts(self):
+        # Exit code 2 after Stop makes Codex continue the turn and call the hook again.
+        guard=Path(__file__).resolve().parents[1]/'plugins'/'chat-tree'/'hooks'/'guard.py'
+        env={**os.environ,'CHAT_TREE_DB':str(self.store.path)}
+        def code(event):
+            return subprocess.run([sys.executable,str(guard)],input=event,text=True,capture_output=True,env=env,timeout=5).returncode
+        self.assertEqual(code(json.dumps({'session_id':{'bad':1},'hook_event_name':'UserPromptSubmit','prompt':'x'})),2)
+        self.assertEqual(code('not json'),1)
+        self.assertEqual(code(json.dumps({'session_id':{'bad':1},'hook_event_name':'Stop'})),0)
+
+    def test_installer_keeps_previous_version_paths_for_running_codex(self):
+        sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
+        import install
+        with tempfile.TemporaryDirectory() as tmp:
+            new=Path(tmp)/'0.2.1';(new/'hooks').mkdir(parents=True);(new/'hooks'/'guard.py').write_text('')
+            install.keep_previous(new,['0.2.0','0.2.1'])
+            self.assertTrue((Path(tmp)/'0.2.0'/'hooks'/'guard.py').is_file())
+            self.assertEqual(os.readlink(Path(tmp)/'0.2.0'),'0.2.1')
+
     def test_internal_subagent_hook_cannot_release_main_chat(self):
         self.bind(self.a,'a-chat');self.store.observe_turn('a-chat','main')
         guard=Path(__file__).resolve().parents[1]/'plugins'/'chat-tree'/'hooks'/'guard.py'
