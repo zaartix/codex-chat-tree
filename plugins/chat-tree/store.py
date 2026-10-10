@@ -369,10 +369,26 @@ class Store:
             if row:
                 raise TreeError('locked', 'Another operation has reserved this branch', operation_id=row['operation_id'])
 
+    @staticmethod
+    def _settled(branch, selected_id):
+        """Completed or closed items below the selected one: their chats are archived and their results saved."""
+        return {n['id'] for n in branch if n['id'] != selected_id and n['state'] in ('done', 'closed')}
+
+    @staticmethod
+    def _below(branch, node, settled, selected_id):
+        parents = {n['id']: n['parent_id'] for n in branch}
+        cursor = parents.get(node['id'])
+        while cursor and cursor != selected_id:
+            if cursor in settled:
+                return True
+            cursor = parents.get(cursor)
+        return False
+
     def _idle(self, db, nodes, actor_chat=None):
         blocked = []
         for n in nodes:
-            if not n['chat_id'] or n['chat_id'] == actor_chat:
+            # A completed or closed item's chat is archived; new work in it reopens the item first.
+            if not n['chat_id'] or n['chat_id'] == actor_chat or n.get('state') in ('done', 'closed'):
                 continue
             state = db.execute('SELECT * FROM runtime WHERE chat_id=?', (n['chat_id'],)).fetchone()
             if not state or not state['hook_seen'] or state['state'] != 'idle':
@@ -528,6 +544,10 @@ class Store:
                 if action in ('delete', 'rebuild') and any(n['chat_id'] == actor_chat for n in self.subtree(db, node['id'])):
                     raise TreeError('current_chat', 'Start deletion or rebuilding from the parent chat')
                 branch = self.subtree(db, node['id'])
+                settled = self._settled(branch, node['id'])
+                if action == 'finish':
+                    # A completed or closed item already holds its result; the items below it are settled with it.
+                    branch = [n for n in branch if not self._below(branch, n, settled, node['id'])]
                 self._unlocked(db, [n['id'] for n in branch])
                 if action != 'start':
                     self._idle(db, branch, idle_actor)
@@ -554,6 +574,9 @@ class Store:
                            (operation_id, node['root_id'], node['id'], action, 'requested', encode(payload), token, now, now))
                 for n in branch:
                     db.execute('INSERT INTO locks(node_id,operation_id) VALUES(?,?)', (n['id'], operation_id))
+                    if action in ('finish', 'rebuild') and n['id'] in settled and not self._below(branch, n, settled, node['id']):
+                        db.execute('INSERT INTO summaries VALUES(?,?,?,?,?,?)', (operation_id, n['id'],
+                                   n['summary'] or 'Closed without a result.', n['chat_id'], None, now))
                 if delivery_parent:
                     db.execute('INSERT INTO locks VALUES(?,?)',(delivery_parent['id'],operation_id))
                 result = {'operation': self.operation(db, operation_id)}

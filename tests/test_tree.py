@@ -207,6 +207,25 @@ class TreeTests(unittest.TestCase):
             self.assertEqual(self.node(node)['project_id'],'chosen-project')
             self.assertEqual(self.node(node)['cwd'],self.temp.name)
 
+    def test_completed_children_are_settled_when_their_parent_finishes(self):
+        # A completed child archived its own chat at the end of its turn, so no Stop recorded it idle.
+        self.bind(self.a,'a-chat')
+        done,closed=self.change(action='add',parent_id=self.a,items=[{'title':'Done'},{'title':'Closed'}])['item_ids']
+        self.bind(done,'done-chat');self.bind(closed,'closed-chat')
+        grandchild=self.change(action='add',parent_id=done,items=[{'title':'Under done'}])['item_ids'][0]
+        self.bind(grandchild,'grand-chat')
+        child=self.op('finish',done);self.summary(child,grandchild,'grand-chat','Grand result');self.summary(child,done,'done-chat','Done result')
+        self.step(child,'delivered');self.step(child,'commit')
+        self.store.close_archived(['closed-chat'])
+        for chat in ('done-chat','closed-chat','grand-chat'):
+            self.store.hook(chat,'UserPromptSubmit','work','work') if chat=='grand-chat' else self.store.observe_turn(chat,'last')
+        op=self.op('finish',self.a)
+        self.assertEqual({n['id'] for n in op['payload']['nodes']},{self.a,done,closed})
+        prompt=json.loads(self.store.service_prompt(op['id'],op['token'],self.a,'summary')['prompt'].splitlines()[-1])
+        self.assertEqual(prompt['children'],[{'title':'Done','summary':'Done result'},{'title':'Closed','summary':'Closed without a result.'}])
+        self.summary(op,self.a,'a-chat');self.step(op,'delivered');self.step(op,'commit')
+        self.assertEqual(self.node(self.a)['state'],'done')
+
     def test_completion_marks_only_selected_keeps_children_and_siblings_current(self):
         self.bind(self.a,'a-chat');self.bind(self.b,'b-chat')
         child=self.change(action='add',parent_id=self.a,items=[{'title':'Deep'}])['item_ids'][0]
