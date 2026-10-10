@@ -9,6 +9,14 @@ Turn an agreed plan into a nested checklist where every item is its own Codex ch
 
 It replaces a flat to-do list, not a task manager: each checkbox is a chat that is not started, ready, working or done.
 
+## Why
+
+You make a plan with the agent and start on the first step. It turns out to have sub-tasks of its own, so you dig into one of them, and that one splits again. A few hours later you have a pile of open chats, and it is hard to tell which one belongs where, what is finished and what was decided along the way.
+
+Chat Tree keeps that work in order. Once the plan for your task is agreed, ask the agent to turn it into a Chat Tree and you get a clean checklist with completion marks. Open the first item: it is a new chat that already knows its task and where it sits in the plan. Do the research there, and if more sub-tasks appear, ask for a Chat Tree again, right in that chat. Nesting can go as deep as the work needs. Every chat keeps its place in the hierarchy and links back to its parent, and when an item is done its result goes up to the parent chat, so you never lose track.
+
+Chat Tree currently works with Codex only. Support for Claude Code is in progress.
+
 ## Install
 
 Requires Codex Desktop and Python 3.9+ available as `python3` (standard library only).
