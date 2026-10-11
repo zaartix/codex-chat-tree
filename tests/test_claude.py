@@ -215,6 +215,20 @@ class ClaudeDispatcherTests(unittest.TestCase):
         panel = self.call('tree_panel')
         self.assertIn('[**1** A](#' + ITEM + ')', panel['outline'])
 
+    def test_delivery_goes_to_the_parent_without_a_node_id(self):
+        node, op, prepared = self.started_item()
+        self.desktop.session(ITEM)
+        self.call('tree_step', operation_id=op['id'], token=op['token'], step='started', data={'node_id': node, 'chat_id': ITEM})
+        self.chat = ITEM
+        finish = self.call('tree_change', change={'action': 'finish', 'node_id': node})['operation']
+        self.call('tree_step', operation_id=finish['id'], token=finish['token'], step='claim')
+        with self.assertRaises(TreeError) as error:
+            self.call('tree_job', operation_id=finish['id'], token=finish['token'], purpose='summary')
+        self.assertEqual(error.exception.code, 'invalid_input')
+        self.call('tree_summary', operation_id=finish['id'], token=finish['token'], summary='Done')
+        delivery = self.call('tree_job', operation_id=finish['id'], token=finish['token'], purpose='delivery')
+        self.assertEqual(delivery['chat_id'], ROOT)
+
     def test_summary_wait_returns_once_saved(self):
         node, op, prepared = self.started_item()
         self.desktop.session(ITEM)

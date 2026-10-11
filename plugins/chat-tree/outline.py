@@ -18,7 +18,8 @@ def _line(node, link, current_id):
     if node['stale'] and not done:
         marks.append('context changed')
     state = (node.get('runtime') or {}).get('state')
-    if not done and state in STATES:
+    # The current chat is always busy while it shows its own tree.
+    if not done and state in STATES and node['id'] != current_id:
         marks.append(STATES[state])
     if node['locked_by']:
         marks.append('reserved')

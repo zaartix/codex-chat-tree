@@ -64,6 +64,7 @@ The Code tab does not show plugin panels, so Chat Tree works through the agent a
 - **Start.** Ask to start an item in the chat of its parent (the root chat for top-level items). The agent creates a Desktop session that inherits the parent's folder, model, effort and permission mode, and the server verifies that they match. The new chat opens with the item card and its checklist.
 - **Complete.** Ask to complete an item. Summaries travel between sessions as messages, the result goes to the parent session, and the item's session is archived. Desktop may ask you to approve archiving and always asks before deleting a session.
 - **Busy chats.** Chat Tree reads whether a session is working from Claude itself, so an interrupted turn never leaves a chat in an unknown state.
+- **Sidebar.** Desktop nests each item chat under the chat that started it, so the sidebar shows the tree too. When a chat is archived, Desktop archives its idle nested chats with it; Chat Tree closes those branches, as when you archive an item chat yourself.
 
 ## How it works
 

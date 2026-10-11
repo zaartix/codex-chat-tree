@@ -679,6 +679,10 @@ class Store:
                 raise TreeError('denied', 'Operation access denied')
             if op['stage'] in ('done','cancelled'):
                 raise TreeError('closed','The operation is already closed')
+            if purpose == 'delivery' and not node_id:
+                node_id = self.node(db, op['node_id'])['parent_id']
+            if not node_id:
+                raise TreeError('invalid_input', 'Pass the node_id of the item whose summary is requested')
             node = self.node(db, node_id)
             if purpose == 'summary':
                 if op['kind'] not in ('finish', 'rebuild') or node_id not in {n['id'] for n in op['payload']['nodes']}:

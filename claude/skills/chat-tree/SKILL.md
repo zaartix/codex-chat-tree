@@ -25,7 +25,7 @@ Built-in texts and service instructions are English. Keep user titles, descripti
 - Apply explicitly requested changes with `tree_change`. Clarify ambiguity first; there is no proposal step.
 - From any depth, read the whole graph and update the requested checklist. Clarify an ambiguous destination; report the changed branch and link.
 - `reopen` returns only the selected completed branch to work and preserves its previous summary.
-- A completed or closed item is an archived chat. A new user message in such a chat reopens the item and every completed or closed ancestor; their chats are unarchived. When the user archives an item chat themselves, the server closes that branch without summaries or delivery and archives the chats below it; completed items keep their results.
+- A completed or closed item is an archived chat. A new user message in such a chat reopens the item and every completed or closed ancestor; their chats are unarchived. When the user archives an item chat themselves, the server closes that branch without summaries or delivery and archives the chats below it; completed items keep their results. Desktop nests item chats under the chat that started them and archives idle nested chats with their parent; the server treats that as the same closing.
 - `move` relocates only branches without chats: an existing chat keeps the settings of the parent it was created from. For a started branch, propose a rebuild instead.
 - Completing an item does not complete its parent or stale its siblings.
 
