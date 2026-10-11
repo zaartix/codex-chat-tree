@@ -56,15 +56,31 @@ def text(value, name, maximum=64000, required=False):
 SCHEMA_VERSION = 1
 
 
+def host_name():
+    """The agent host this process serves: the Claude plugin sets CHAT_TREE_HOST=claude, Codex sets nothing."""
+    return os.environ.get('CHAT_TREE_HOST') or 'codex'
+
+
 def data_path():
     if os.environ.get('CHAT_TREE_DB'):
         return Path(os.environ['CHAT_TREE_DB']).expanduser()
-    # Stable across plugin versions and cache removal.
+    # Stable across plugin versions and cache removal; each host keeps its own trees.
+    if host_name() == 'claude':
+        return Path(os.environ.get('CLAUDE_CONFIG_DIR', str(Path.home() / '.claude'))) / 'chat-tree' / 'tree.sqlite3'
     return Path(os.environ.get('CODEX_HOME', str(Path.home() / '.codex'))) / 'chat-tree' / 'tree.sqlite3'
 
 
+def codex_link(chat_id):
+    return 'codex://threads/' + chat_id
+
+
 class Store:
-    def __init__(self, path=None):
+    def __init__(self, path=None, link=codex_link, live=None, parent_creates=False):
+        """`link` turns a chat ID into a link the host opens. `live`, when the host reports chat activity itself,
+        maps chat IDs to 'idle' or 'working' and replaces the state recorded by lifecycle hooks. With
+        `parent_creates`, a new chat inherits the settings of the chat that creates it, so only the immediate
+        parent's chat may start or rebuild its items."""
+        self.link, self.live, self.parent_creates = link, live, parent_creates
         self.path = Path(path) if path is not None else data_path()
         self.path.parent.mkdir(parents=True, exist_ok=True)
         with self.connect() as db:
@@ -180,7 +196,7 @@ class Store:
         chain.reverse()
         numbers = self.numbers(db, chain[0]['id'])
         return [{'node_id': n['id'], 'number': numbers.get(n['id']), 'title': n['title'], 'description':n['description'], 'context': n['context'],
-                 'chat_id':n['chat_id'], 'chat_url':'codex://threads/'+n['chat_id'] if n['chat_id'] else None,
+                 'chat_id':n['chat_id'], 'chat_url':self.link(n['chat_id']) if n['chat_id'] else None,
                  'common_context': n['common_context'], 'revision': n['revision']} for n in chain]
 
     def view(self, chat_id=None, focus_id=None, root_id=None):
@@ -205,12 +221,12 @@ class Store:
                         'proposals': proposals, 'operations': [], 'revision': None}
             root = self.node(db, selected['root_id'])
             nodes = [dict(r) for r in db.execute('SELECT * FROM nodes WHERE root_id=? ORDER BY position,created', (root['id'],))]
-            runtime = {r['chat_id']: dict(r) for r in db.execute('SELECT chat_id,state,hook_seen,updated FROM runtime')}
+            runtime = self._runtime(db, [n['chat_id'] for n in nodes if n['chat_id']])
             numbers = self.numbers(db, root['id'])
             for n in nodes:
                 n['number'] = numbers.get(n['id'])
                 n['results'] = [dict(r) for r in db.execute('SELECT * FROM results WHERE parent_id=? ORDER BY created', (n['id'],))]
-                n['runtime'] = runtime.get(n['chat_id'], {'state': 'unknown', 'hook_seen': 0}) if n['chat_id'] else None
+                n['runtime'] = runtime[n['chat_id']] if n['chat_id'] else None
                 lock = db.execute('SELECT operation_id FROM locks WHERE node_id=?', (n['id'],)).fetchone()
                 n['locked_by'] = lock['operation_id'] if lock else None
             proposals = [dict(r) for r in db.execute("SELECT * FROM proposals WHERE root_id=? AND state='pending' ORDER BY created", (root['id'],))]
@@ -264,16 +280,16 @@ class Store:
                 self._want(db, [n['chat_id'] for n in branch], archived=1)
                 self._touch(db, branch[-1])
                 db.execute('INSERT INTO audit(action,evidence,payload,created) VALUES(?,?,?,?)',
-                           ('close_archived_chat', encode({'source': 'codex_chat_archived', 'chat_id': chat_id}),
+                           ('close_archived_chat', encode({'source': 'chat_archived', 'chat_id': chat_id}),
                             encode({'node_ids': ids}), time.time()))
                 closed.append({'chat_id': chat_id, 'node_ids': ids})
         return closed
 
     def sync(self, chats):
-        """Compare Codex chats with the tree and return the native actions still needed.
+        """Compare host chats with the tree and return the native actions still needed.
 
-        `chats` maps chat ids to {'title', 'archived'} as Codex reports them. A requested archive state that Codex
-        already shows is settled. An item chat archived without a request closes its branch.
+        `chats` maps chat ids to {'title', 'archived'} as the host reports them. A requested archive state that the
+        host already shows is settled. An item chat archived without a request closes its branch.
         """
         with self.connect() as db:
             wants = {r['chat_id']: dict(r) for r in db.execute('SELECT * FROM chat_sync')}
@@ -293,18 +309,18 @@ class Store:
                 if want and bool(want['archived']) == chat['archived']:
                     db.execute('DELETE FROM chat_sync WHERE chat_id=?', (chat_id,))
                 elif want:
-                    actions.append({'action': 'archive' if want['archived'] else 'unarchive', 'threadId': chat_id})
+                    actions.append({'action': 'archive' if want['archived'] else 'unarchive', 'chat_id': chat_id})
                 name = titles.get(chat_id)
                 # Archived chats get their number when they are unarchived.
                 if name and not chat['archived'] and not chat['title'].startswith(name['prefix']):
                     rest = re.sub(r'^\[[\d.]+\]\s*', '', chat['title']) or name['title']
-                    actions.append({'action': 'rename', 'threadId': chat_id, 'title': name['prefix'] + rest})
+                    actions.append({'action': 'rename', 'chat_id': chat_id, 'title': name['prefix'] + rest})
         return actions
 
     def pending_archives(self, root_id, except_chat=None):
-        """Requested archive changes in one tree that Codex has not confirmed yet."""
+        """Requested archive changes in one tree that the host has not confirmed yet."""
         with self.connect() as db:
-            return [{'action': 'archive' if r['archived'] else 'unarchive', 'threadId': r['chat_id']}
+            return [{'action': 'archive' if r['archived'] else 'unarchive', 'chat_id': r['chat_id']}
                     for r in db.execute('''SELECT s.* FROM chat_sync s JOIN nodes n ON n.chat_id=s.chat_id
                                           WHERE n.root_id=? ORDER BY s.updated''', (root_id,)) if r['chat_id'] != except_chat]
 
@@ -313,9 +329,9 @@ class Store:
             return [r['chat_id'] for r in db.execute('SELECT chat_id FROM nodes WHERE chat_id IS NOT NULL')]
 
     def forget_chats(self, chat_ids):
-        """Remove items whose chats were deleted in Codex, with their whole branch; a deleted root chat removes its tree.
+        """Remove items whose chats were deleted in the host, with their whole branch; a deleted root chat removes its tree.
 
-        Chats of removed descendants stay in Codex. A branch reserved by an operation is left to that operation,
+        Chats of removed descendants stay in the host. A branch reserved by an operation is left to that operation,
         because delete and rebuild remove chats before they commit.
         """
         removed = []
@@ -345,7 +361,7 @@ class Store:
                 if top['parent_id']:
                     self._touch(db, self.node(db, top['parent_id']))
                 db.execute('INSERT INTO audit(action,evidence,payload,created) VALUES(?,?,?,?)',
-                           ('forget_deleted_chat', encode({'source': 'codex_chat_deleted', 'chat_id': chat_id}),
+                           ('forget_deleted_chat', encode({'source': 'chat_deleted', 'chat_id': chat_id}),
                             encode({'node_ids': ids, 'titles': [n['title'] for n in branch]}), time.time()))
                 removed.append({'chat_id': chat_id, 'node_ids': ids})
         return removed
@@ -384,17 +400,21 @@ class Store:
             cursor = parents.get(cursor)
         return False
 
+    def _runtime(self, db, chat_ids):
+        """State of each chat: reported by the host when it can, otherwise recorded by trusted lifecycle hooks."""
+        if self.live:
+            live = self.live(chat_ids)
+            return {c: {'state': live.get(c, 'unknown'), 'hook_seen': 1} for c in chat_ids}
+        rows = {r['chat_id']: dict(r) for r in db.execute('SELECT chat_id,state,hook_seen,updated FROM runtime')}
+        return {c: rows.get(c, {'state': 'unknown', 'hook_seen': 0}) for c in chat_ids}
+
     def _idle(self, db, nodes, actor_chat=None):
-        blocked = []
-        for n in nodes:
-            # A completed or closed item's chat is archived; new work in it reopens the item first.
-            if not n['chat_id'] or n['chat_id'] == actor_chat or n.get('state') in ('done', 'closed'):
-                continue
-            state = db.execute('SELECT * FROM runtime WHERE chat_id=?', (n['chat_id'],)).fetchone()
-            if not state or not state['hook_seen'] or state['state'] != 'idle':
-                blocked.append({'title': n['title'], 'chat_id': n['chat_id'],
-                                'state': state['state'] if state else 'unknown',
-                                'url': 'codex://threads/' + n['chat_id']})
+        # A completed or closed item's chat is archived; new work in it reopens the item first.
+        checked = [n for n in nodes if n['chat_id'] and n['chat_id'] != actor_chat and n.get('state') not in ('done', 'closed')]
+        runtime = self._runtime(db, [n['chat_id'] for n in checked])
+        blocked = [{'title': n['title'], 'chat_id': n['chat_id'], 'state': runtime[n['chat_id']]['state'],
+                    'url': self.link(n['chat_id'])} for n in checked
+                   if not runtime[n['chat_id']]['hook_seen'] or runtime[n['chat_id']]['state'] != 'idle']
         if blocked:
             raise TreeError('busy', 'Operation blocked: an agent is working or the chat state has not been verified by the plugin hooks', chats=blocked)
 
@@ -506,7 +526,7 @@ class Store:
                 if not node['parent_id'] or parent['root_id'] != node['root_id'] or parent['id'] in {n['id'] for n in branch}:
                     raise TreeError('invalid_move', 'The branch cannot be moved to this location')
                 # Existing chats were forked from the old parent; moving them would break strict inheritance.
-                linked = [{'title': n['title'], 'chat_id': n['chat_id'], 'url': 'codex://threads/'+n['chat_id']} for n in branch if n['chat_id']]
+                linked = [{'title': n['title'], 'chat_id': n['chat_id'], 'url': self.link(n['chat_id'])} for n in branch if n['chat_id']]
                 if linked:
                     raise TreeError('started_branch', 'Only branches without chats can be moved; started chats keep their parent settings. Rebuild the branch instead', chats=linked)
                 self._unlocked(db, [n['id'] for n in branch] + [parent['id']])
@@ -531,7 +551,7 @@ class Store:
                 if action == 'start' and node['chat_id']:
                     if proposal_id:
                         db.execute("UPDATE proposals SET state='approved' WHERE id=?", (proposal_id,))
-                    return {'node_id': node['id'], 'chat_id': node['chat_id'], 'url': 'codex://threads/'+node['chat_id']}
+                    return {'node_id': node['id'], 'chat_id': node['chat_id'], 'url': self.link(node['chat_id'])}
                 existing = db.execute("SELECT id FROM operations WHERE node_id=? AND kind=? AND stage NOT IN ('done','cancelled')", (node['id'], action)).fetchone()
                 if existing:
                     if proposal_id:
@@ -558,6 +578,9 @@ class Store:
                 parent = self.node(db,node['parent_id']) if node['parent_id'] else None
                 if action == 'start' and (not parent or not parent['chat_id']):
                     raise TreeError('parent_not_started','Open the immediate parent chat first to inherit its settings',node_id=parent['id'] if parent else node['id'])
+                if self.parent_creates and action in ('start', 'rebuild') and parent and parent['chat_id'] != actor_chat:
+                    raise TreeError('open_parent', 'Ask for this in the chat of the immediate parent: a new chat inherits the settings of the chat that creates it',
+                                    chat_id=parent['chat_id'], url=self.link(parent['chat_id']) if parent['chat_id'] else None)
                 if action in ('finish','rebuild') and parent and not parent['chat_id']:
                     raise TreeError('parent_not_started','Create the immediate parent chat first to deliver the summary',node_id=parent['id'])
                 delivery_parent = parent if action in ('finish','rebuild') and parent and parent['chat_id'] != actor_chat else None
@@ -587,7 +610,9 @@ class Store:
             db.execute('INSERT INTO audit(action,evidence,payload,created) VALUES(?,?,?,?)', (action, encode(evidence), encode(change), now))
             return result
 
-    def reserve_creation(self, operation_id, token, node_id, actor_chat):
+    def reserve_creation(self, operation_id, token, node_id, actor_chat, repeat=False):
+        """Reserve the one chat an operation may create for an item. With `repeat`, a reservation whose chat has not
+        appeared yet is returned again: the host creates the chat later and binds it by the operation token."""
         with self.transaction() as db:
             op = self.operation(db, operation_id)
             allowed = [op['node_id']] if op['kind'] == 'start' else op['payload']['replacement_ids'] if op['kind'] == 'rebuild' else []
@@ -597,6 +622,8 @@ class Store:
             creations = op['payload'].setdefault('creations', {})
             if not node['parent_id'] or not self.node(db, node['parent_id'])['chat_id']:
                 raise TreeError('parent_not_started', 'Open the immediate parent chat first to inherit its settings')
+            if repeat and node_id in creations and not node['chat_id']:
+                return node
             if node_id in creations or node['chat_id']:
                 raise TreeError('already_creating', 'Creation has already started. Inspect the saved UUID before continuing; do not create a duplicate chat', chat_id=node['chat_id'])
             creations[node_id] = {'started': time.time()}
@@ -615,6 +642,28 @@ class Store:
             db.execute('UPDATE nodes SET chat_id=? WHERE id=?', (chat_id, node_id))
             db.execute('UPDATE operations SET payload=? WHERE id=?', (encode(op['payload']), operation_id))
             db.execute('INSERT OR IGNORE INTO locks VALUES(?,?)', (node_id, operation_id))
+
+    def adopt(self, chat_id, prompt):
+        """Bind a new chat whose first prompt carries the token of an operation creating exactly one pending item chat.
+
+        Hosts where only the agent can create chats bind them this way, before the first turn runs."""
+        if not chat_id or not prompt:
+            return None
+        with self.connect() as db:
+            if db.execute('SELECT 1 FROM nodes WHERE chat_id=?', (chat_id,)).fetchone():
+                return None
+            for row in db.execute("SELECT id FROM operations WHERE stage IN ('creating','preparing') AND kind IN ('start','rebuild')").fetchall():
+                op = self.operation(db, row['id'])
+                if op['token'] not in prompt:
+                    continue
+                pending = [node_id for node_id, c in op['payload'].get('creations', {}).items()
+                           if not c.get('chat_id') and not self.node(db, node_id)['chat_id']]
+                if len(pending) == 1:
+                    break
+            else:
+                return None
+        self.created(op['id'], op['token'], pending[0], chat_id)
+        return self.bind(op['id'], op['token'], chat_id, pending[0])
 
     def job(self, operation_id, token):
         with self.connect() as db:
@@ -796,6 +845,7 @@ class Store:
             db.execute("INSERT INTO runtime VALUES(?,'idle',NULL,NULL,1,?) ON CONFLICT(chat_id) DO NOTHING", (chat_id, time.time()))
 
     def hook(self, chat_id, event, turn_id=None, prompt=None):
+        adopted = event == 'UserPromptSubmit' and self.adopt(chat_id, prompt)
         with self.transaction() as db:
             node = db.execute('SELECT * FROM nodes WHERE chat_id=?', (chat_id,)).fetchone()
             if not node:
@@ -834,4 +884,4 @@ class Store:
                 db.execute('''INSERT INTO runtime VALUES(?,?,?,NULL,1,?) ON CONFLICT(chat_id) DO UPDATE SET
                               state=excluded.state,prompt=NULL,hook_seen=1,updated=excluded.updated''',
                            (chat_id, 'idle' if event == 'Stop' or (event=='SessionEnd' and row and row['state']=='idle') else 'unknown', turn_id, time.time()))
-            return {**dict(node), 'reopened': reopened}
+            return {**dict(node), 'reopened': reopened, 'adopted': bool(adopted)}

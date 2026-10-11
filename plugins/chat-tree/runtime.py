@@ -9,8 +9,14 @@ import time
 from contextlib import contextmanager
 from pathlib import Path
 
+from store import codex_link
+
 
 class CodexHistory:
+    name = 'codex'
+    link_to = staticmethod(codex_link)
+    live = None  # Codex reports chat activity to the plugin hooks only.
+
     def __init__(self, executable=None):
         bundled = Path('/Applications/ChatGPT.app/Contents/Resources/codex-cli/bin/codex')
         self.executable = executable or os.environ.get('CODEX_CLI_PATH') or (str(bundled) if bundled.exists() else shutil.which('codex'))

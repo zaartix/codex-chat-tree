@@ -1,0 +1,16 @@
+{
+  "description": "Pass branch context to Chat Tree item chats and keep reserved branches safe.",
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 -c \"import os,runpy,sys; p=sys.argv[1]; os.path.isfile(p) or sys.exit(0); os.environ['CHAT_TREE_HOST']='claude'; sys.argv=[p]; runpy.run_path(p,run_name='__main__')\" \"${CLAUDE_PLUGIN_ROOT}/plugins/chat-tree/hooks/guard.py\"",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}

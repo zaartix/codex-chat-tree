@@ -5,10 +5,24 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from store import Store, TreeError, data_path, LANGUAGE_INSTRUCTION
+from store import Store, TreeError, data_path, host_name, LANGUAGE_INSTRUCTION
 
 
 EVENT = {}
+SYNC = {'codex': 'archive -> set_thread_archived archived=true, unarchive -> archived=false',
+        'claude': 'archive -> archive_session, unarchive -> unarchive_session'}
+OPENING = ('Chat Tree created this chat for the item below; this first message is its card, not a request to work. '
+           'Call tree_panel once and show its outline, then reply with one short line saying the chat is ready for this item. '
+           'Do not start the task, read files or change the tree. ')
+
+
+def chat_store(event):
+    """The chat a hook event belongs to and the store of this host."""
+    if host_name() == 'claude':
+        import claude
+        host = claude.ClaudeDesktop()
+        return host.hook_chat(event), event.get('prompt_id'), Store(link=claude.link, live=host.live, parent_creates=True)
+    return event.get('session_id'), event.get('turn_id'), Store()
 
 
 def main():
@@ -23,11 +37,11 @@ def main():
         print('{}')
         return
     try:
-        store = Store()
+        chat_id, turn_id, store = chat_store(event)
     except TreeError as error:
         sys.exit('Chat Tree: ' + str(error))
     try:
-        node = store.hook(event.get('session_id'), event.get('hook_event_name'), event.get('turn_id'), event.get('prompt'))
+        node = store.hook(chat_id, event.get('hook_event_name'), turn_id, event.get('prompt'))
     except Exception:
         if event.get('hook_event_name') == 'UserPromptSubmit':
             raise
@@ -37,20 +51,20 @@ def main():
     if not node or event.get('hook_event_name') != 'UserPromptSubmit':
         print('{}')
         return
-    view = store.view(event['session_id'])
+    view = store.view(chat_id)
     children = [{'title': n['title'], 'summary': n['summary'], 'stale': bool(n['stale']), 'state': n['state']}
                 for n in view['nodes'] if n['parent_id'] == node['id'] and n['summary']]
     context = {'node_id': node['id'], 'root_id': node['root_id'], 'title': node['title'],
                'context_chain': view['contexts'], 'direct_child_results': children,
                'saved_decisions': next(n for n in view['nodes'] if n['id']==node['id'])['results'], 'stale': bool(node['stale'])}
-    first = ''
+    first = OPENING if node.get('adopted') else ''
     if node.get('reopened'):
         first += ('This item was completed and its chat archived; this message reopened it. Tell the user once that the item '
                   'is open again and will be completed again when they ask. ')
-    pending = store.pending_archives(node['root_id'], except_chat=event['session_id'])
+    pending = store.pending_archives(node['root_id'], except_chat=chat_id)
     if pending:
         first += ('Apply these Chat Tree chat changes with native tools before anything else, without mentioning them unless one '
-                  'fails: archive -> set_thread_archived archived=true, unarchive -> archived=false. ' + json.dumps(pending) + ' ')
+                  'fails: ' + SYNC[host_name()] + '. ' + json.dumps(pending) + ' ')
     print(json.dumps({'hookSpecificOutput': {'hookEventName': 'UserPromptSubmit',
            'additionalContext': 'Chat Tree: current context of the linked branch. Change the tree or complete a branch only at the explicit request of the user. Use the chat-tree skill for operations. ' + first + LANGUAGE_INSTRUCTION + '\n' + json.dumps(context, ensure_ascii=False)}}))
 

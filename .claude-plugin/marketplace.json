@@ -1,0 +1,15 @@
+{
+  "name": "chat-tree",
+  "owner": {
+    "name": "zaartix"
+  },
+  "description": "Chat Tree: nested task checklists where every item is its own chat.",
+  "plugins": [
+    {
+      "name": "chat-tree",
+      "source": "./",
+      "description": "Nested task checklists where every item is its own Claude Code session.",
+      "category": "productivity"
+    }
+  ]
+}

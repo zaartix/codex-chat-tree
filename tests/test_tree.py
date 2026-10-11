@@ -127,8 +127,8 @@ class TreeTests(unittest.TestCase):
                'b-chat':{'title':'[2] B, my notes','archived':False}}
         self.assertEqual(self.sync_with(chats),[])
         with self.store.transaction() as db:db.execute('UPDATE nodes SET position=CASE id WHEN ? THEN 1 ELSE 0 END WHERE parent_id=?',(self.a,self.root))
-        self.assertEqual(self.sync_with(chats),[{'action':'rename','threadId':'a-chat','title':'[2] A'},
-                                                {'action':'rename','threadId':'b-chat','title':'[1] B, my notes'}])
+        self.assertEqual(self.sync_with(chats),[{'action':'rename','chat_id':'a-chat','title':'[2] A'},
+                                                {'action':'rename','chat_id':'b-chat','title':'[1] B, my notes'}])
 
     def test_agent_results_carry_pending_native_actions(self):
         self.bind(self.a,'a-chat')
@@ -137,13 +137,13 @@ class TreeTests(unittest.TestCase):
         result=Dispatcher(self.store,History()).call('tree_read',{},{'chat_id':'root-chat','turn_id':None,'ui':False})
         self.assertNotIn('sync',result)
         handled=Dispatcher(self.store,History()).handle('tools/call',{'name':'tree_read','arguments':{},'_meta':{'x-codex-turn-metadata':{'thread_id':'root-chat','turn_id':'t1'}}})
-        self.assertEqual(handled['structuredContent']['sync'],[{'action':'rename','threadId':'a-chat','title':'[1] A'}])
+        self.assertEqual(handled['structuredContent']['sync'],[{'action':'rename','chat_id':'a-chat','title':'[1] A'}])
 
     def test_completed_item_chat_must_be_archived(self):
         self.bind(self.a,'a-chat');op=self.op('finish',self.a);self.summary(op,self.a,'a-chat')
         self.step(op,'delivered');self.step(op,'commit')
         live={'root-chat':{'title':'Root','archived':False},'a-chat':{'title':'[1] A','archived':False}}
-        self.assertEqual(self.sync_with(live),[{'action':'archive','threadId':'a-chat'}])
+        self.assertEqual(self.sync_with(live),[{'action':'archive','chat_id':'a-chat'}])
         live['a-chat']['archived']=True
         self.assertEqual(self.sync_with(live),[]);self.assertEqual(self.node(self.a)['state'],'done')
         with self.store.connect() as db:self.assertIsNone(db.execute('SELECT 1 FROM chat_sync').fetchone())
@@ -158,7 +158,7 @@ class TreeTests(unittest.TestCase):
         self.assertEqual({n['title']:n['state'] for n in self.store.view('root-chat')['nodes']},
                          {'Root':'closed','A':'closed','B':'done','A1':'closed'})
         self.assertEqual(self.node(self.b)['summary'],'Kept')
-        self.assertEqual(sorted(a['threadId'] for a in actions if a['action']=='archive'),['a-chat','a1-chat'])
+        self.assertEqual(sorted(a['chat_id'] for a in actions if a['action']=='archive'),['a-chat','a1-chat'])
         with self.store.connect() as db:
             self.assertFalse([r for r in db.execute("SELECT 1 FROM operations WHERE stage NOT IN ('done','cancelled')")])
 
@@ -180,7 +180,7 @@ class TreeTests(unittest.TestCase):
         self.assertTrue(result['reopened'])
         self.assertEqual({n['title']:n['state'] for n in self.store.view('root-chat')['nodes']},{'Root':'todo','A':'todo','A1':'todo','B':'closed'})
         chats={'root-chat':{'title':'Root','archived':True},'a-chat':{'title':'[1] A','archived':True},'a1-chat':{'title':'[1.1] A1','archived':False}}
-        self.assertEqual(sorted((a['action'],a['threadId']) for a in self.sync_with(chats)),[('unarchive','a-chat'),('unarchive','root-chat')])
+        self.assertEqual(sorted((a['action'],a['chat_id']) for a in self.sync_with(chats)),[('unarchive','a-chat'),('unarchive','root-chat')])
 
     def test_linked_chat_can_browse_another_tree(self):
         other = self.store.apply({'action':'create','title':'Other','items':[{'title':'X'},{'title':'Y'}]}, EVIDENCE, 'other-chat')

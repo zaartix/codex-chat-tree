@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "chat_tree": {
+      "command": "python3",
+      "args": ["${CLAUDE_PLUGIN_ROOT}/plugins/chat-tree/server.py"],
+      "env": {"CHAT_TREE_HOST": "claude"}
+    }
+  }
+}

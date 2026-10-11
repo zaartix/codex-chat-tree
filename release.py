@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Publish a release: python3 release.py 0.3.0
 
-Runs the tests, sets the plugin version, commits, tags v<version> and pushes.
+Runs the tests, sets the version of the Codex and Claude plugins, commits, tags v<version> and pushes.
 Users update by running the installer again.
 """
 import json
@@ -12,6 +12,7 @@ from pathlib import Path
 
 root = Path(__file__).resolve().parent
 manifest = root / 'plugins' / 'chat-tree' / '.codex-plugin' / 'plugin.json'
+claude_manifest = root / '.claude-plugin' / 'plugin.json'
 
 
 def run(*args):
@@ -30,6 +31,9 @@ def main():
     run(sys.executable, '-m', 'unittest', 'discover', '-s', 'tests')
     data['version'] = version
     manifest.write_text(json.dumps(data, indent=2, ensure_ascii=False) + '\n')
+    claude_data = json.loads(claude_manifest.read_text())
+    claude_data['version'] = version
+    claude_manifest.write_text(json.dumps(claude_data, indent=2, ensure_ascii=False) + '\n')
     run('git', 'add', '-A')
     run('git', 'commit', '-m', 'release: ' + version)
     run('git', 'tag', 'v' + version)

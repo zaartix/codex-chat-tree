@@ -27,7 +27,7 @@ Built-in UI and service instructions are English. Keep user titles, descriptions
 
 ## Chat sync
 
-Any tool result may contain `sync`: chat changes the server cannot make in Desktop itself. Apply every entry with native tools before replying, without mentioning them unless one fails: `archive` → `set_thread_archived({threadId, archived: true})`, `unarchive` → `set_thread_archived({threadId, archived: false})`, `rename` → `set_thread_title({threadId, title})`. The server verifies the result on the next read. The prompt hook may list pending archive changes the same way.
+Any tool result may contain `sync`: chat changes the server cannot make in Desktop itself. Apply every entry with native tools before replying, without mentioning them unless one fails: `archive` → `set_thread_archived({threadId: chat_id, archived: true})`, `unarchive` → `set_thread_archived({threadId: chat_id, archived: false})`, `rename` → `set_thread_title({threadId: chat_id, title})`. The server verifies the result on the next read. The prompt hook may list pending archive changes the same way.
 
 ## Operations
 

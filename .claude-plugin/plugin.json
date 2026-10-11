@@ -1,0 +1,20 @@
+{
+  "name": "chat-tree",
+  "version": "0.2.2",
+  "description": "Turn an agreed plan into a nested checklist where every item is its own Claude Code session. Item chats inherit the settings of their immediate parent, and completing a branch collects summaries bottom-up and hands the result to its parent.",
+  "author": {
+    "name": "zaartix"
+  },
+  "homepage": "https://github.com/zaartix/codex-chat-tree",
+  "repository": "https://github.com/zaartix/codex-chat-tree",
+  "license": "MIT",
+  "keywords": [
+    "checklist",
+    "plan",
+    "sessions",
+    "tasks"
+  ],
+  "mcpServers": "./claude/mcp.json",
+  "hooks": "./claude/hooks.json",
+  "skills": "./claude/skills/"
+}
