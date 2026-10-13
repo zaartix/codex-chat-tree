@@ -1,6 +1,6 @@
 {
   "name": "chat-tree",
-  "version": "0.2.2",
+  "version": "0.3.0",
   "description": "Turn an agreed plan into a nested checklist where every item is its own Claude Code session. Item chats inherit the settings of their immediate parent, and completing a branch collects summaries bottom-up and hands the result to its parent.",
   "author": {
     "name": "zaartix"
