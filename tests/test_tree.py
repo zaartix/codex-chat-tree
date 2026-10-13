@@ -266,12 +266,27 @@ class TreeTests(unittest.TestCase):
         self.assertEqual(self.node(self.a)['summary'],summary)
 
     def test_context_revision_stales_only_dependent_nested_checklists(self):
-        deep=self.change(action='add',parent_id=self.a,items=[{'title':'Deep'}])['item_ids'][0]
+        deep,later=self.change(action='add',parent_id=self.a,items=[{'title':'Deep'},{'title':'Later'}])['item_ids']
+        self.bind(self.a,'a-chat');self.bind(deep,'deep-chat')
         self.change(action='edit',node_id=self.root,common_context='New shared',context='')
         self.assertFalse(self.node(self.a)['stale']);self.assertTrue(self.node(deep)['stale'])
+        # An item without a chat has done no work under the old context; its chat starts with the new one.
+        self.assertFalse(self.node(later)['stale'])
+        self.bind(later,'later-chat');self.assertFalse(self.node(later)['stale'])
         chain=self.store.view(focus_id=deep)['contexts']
         self.assertEqual(chain[0]['common_context'],'New shared')
         self.assertEqual(chain[1]['context'],'Personal A')
+
+    def test_completed_item_stays_completed_when_its_context_changes(self):
+        deep=self.change(action='add',parent_id=self.a,items=[{'title':'Deep'}])['item_ids'][0]
+        self.bind(self.a,'a-chat');self.bind(deep,'deep-chat')
+        op=self.op('finish',deep);self.summary(op,deep,'deep-chat');self.step(op,'delivered');self.step(op,'commit')
+        self.change(action='edit',node_id=self.a,context='Changed A')
+        node=next(n for n in self.store.view('root-chat')['nodes'] if n['id']==deep)
+        self.assertEqual((node['state'],node['stale']),('done',1))
+        # Moving unstarted items marks nothing as changed.
+        self.change(action='move',node_id=self.b,destination_id=self.a)
+        self.assertFalse(self.node(self.b)['stale'])
 
     def test_working_chat_blocks_operation_with_link(self):
         self.bind(self.a,'a-chat');self.store.hook('a-chat','UserPromptSubmit','work','ordinary task')

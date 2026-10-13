@@ -15,7 +15,7 @@ def _line(node, link, current_id):
     marks = []
     if node['state'] == 'closed':
         marks.append('closed')
-    if node['stale'] and not done:
+    if node['stale']:
         marks.append('context changed')
     state = (node.get('runtime') or {}).get('state')
     # The current chat is always busy while it shows its own tree.
@@ -48,7 +48,7 @@ def outline(view, link):
     lines = []
     if focus['id'] == root['id']:
         items = children.get(root['id'], [])
-        done = sum(1 for n in items if n['state'] in ('done', 'closed') and not n['stale'])
+        done = sum(1 for n in items if n['state'] in ('done', 'closed'))
         lines.append('### ' + _title(root, link) + ' · ' + str(done) + '/' + str(len(items)) + ' done')
         top, depth = items, 0
     else:

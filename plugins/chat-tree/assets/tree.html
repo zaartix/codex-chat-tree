@@ -61,7 +61,6 @@ header{position:sticky;top:0;z-index:5;background:var(--bg);padding:10px 12px 8p
 .segments span{flex:1;border-radius:2px;background:var(--line-strong)}
 .segments .done{background:var(--done)}
 .segments .working{background:var(--work)}
-.segments .stale{background:var(--warn)}
 .segments.solid span{border-radius:2px}
 .progress-text{font-size:12px;color:var(--muted);white-space:nowrap}
 .progress-text b{color:var(--text);font-weight:600}
@@ -128,7 +127,6 @@ header{position:sticky;top:0;z-index:5;background:var(--bg);padding:10px 12px 8p
 .status.working,.status.busy{color:var(--work)}
 .status.busy{color:var(--warn)}
 .status.done{color:var(--done)}
-.status.stale{color:var(--warn)}
 .spin{transform-origin:8px 8px;animation:spin 1s linear infinite}
 @keyframes spin{to{transform:rotate(360deg)}}
 
@@ -242,7 +240,7 @@ const byId=id=>data?.nodes?.find(n=>n.id===id);
 function ancestors(n){const chain=[];while(n){chain.unshift(n);n=byId(n.parent_id)}return chain}
 function children(n){return data.nodes.filter(x=>x.parent_id===n.id)}
 function descendants(n){return data.nodes.filter(x=>x.id!==n.id&&ancestors(x).some(a=>a.id===n.id))}
-function status(n){if(n.locked_by||starting.has(n.id))return'busy';if(n.stale)return'stale';if(n.state==='done')return'done';if(n.state==='closed')return'closed';if(!n.chat_id)return'new';const r=n.runtime?.state;return r==='running'||r==='service'?'working':'ready'}
+function status(n){if(n.locked_by||starting.has(n.id))return'busy';if(n.state==='done')return'done';if(n.state==='closed')return'closed';if(!n.chat_id)return'new';const r=n.runtime?.state;return r==='running'||r==='service'?'working':'ready'}
 const STATUS_TEXT={new:'Not started',ready:'Chat ready',working:'Agent working',done:'Completed',closed:'Closed without result',stale:'Context changed',busy:'Operation in progress'};
 function stateText(n){return starting.has(n.id)?'Creating chat…':STATUS_TEXT[status(n)]}
 function isCurrent(n){return n.id===data.current_node_id}
@@ -257,11 +255,10 @@ function statusIcon(s,size=16){const svg={
   working:'<circle cx="8" cy="8" r="6" fill="none" stroke="currentColor" stroke-opacity=".25" stroke-width="1.6"/><path class="spin" d="M8 2a6 6 0 0 1 6 6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>',
   busy:'<circle cx="8" cy="8" r="6" fill="none" stroke="currentColor" stroke-opacity=".25" stroke-width="1.6"/><path class="spin" d="M8 2a6 6 0 0 1 6 6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>',
   done:'<circle cx="8" cy="8" r="7" fill="currentColor"/><path d="M5 8.2l2 2 4-4.4" fill="none" stroke="var(--bg)" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>',
-  closed:'<circle cx="8" cy="8" r="6.3" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M5.6 5.6l4.8 4.8M10.4 5.6l-4.8 4.8" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>',
-  stale:'<circle cx="8" cy="8" r="6" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M8 4.8v3.6" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><circle cx="8" cy="10.9" r=".95" fill="currentColor"/>'}[s];
+  closed:'<circle cx="8" cy="8" r="6.3" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M5.6 5.6l4.8 4.8M10.4 5.6l-4.8 4.8" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>'}[s];
   return el('span',{class:'status '+s,'aria-hidden':'true',html:'<svg width="'+size+'" height="'+size+'" viewBox="0 0 16 16">'+svg+'</svg>'})}
 function ring(done,total,size=16){const r=6,c=2*Math.PI*r,p=total?done/total:0;return el('span',{class:'ring','aria-hidden':'true',html:'<svg width="'+size+'" height="'+size+'" viewBox="0 0 16 16"><circle cx="8" cy="8" r="'+r+'" fill="none" stroke="var(--line-strong)" stroke-width="2"/><circle cx="8" cy="8" r="'+r+'" fill="none" stroke="var(--done)" stroke-width="2" stroke-linecap="round" stroke-dasharray="'+(c*p)+' '+c+'" transform="rotate(-90 8 8)"/></svg>'})}
-function tally(list){const t={total:list.length,done:0,working:0,stale:0};for(const n of list){const s=status(n);if(s==='done'||s==='closed')t.done++;else if(s==='working'||s==='busy')t.working++;else if(s==='stale')t.stale++}return t}
+function tally(list){const t={total:list.length,done:0,working:0,stale:0};for(const n of list){const s=status(n);if(s==='done'||s==='closed')t.done++;else if(s==='working'||s==='busy')t.working++;if(n.stale)t.stale++}return t}
 
 /* ---------- Selection and data ---------- */
 function reveal(id){for(const a of ancestors(byId(id)).slice(0,-1))expanded.add(a.id)}
@@ -299,7 +296,7 @@ function toolbar(){return el('div',{class:'tools'},[
     treeToggle(),
     displayModeButton()])}
 function progressLine(list){const t=tally(list),seg=el('div',{class:'segments'+(list.length>24?' solid':''),'aria-hidden':'true'});
-  if(list.length>24){const add=(cls,count)=>{if(count)seg.append(el('span',{class:cls,style:'flex:'+count}))};add('done',t.done);add('working',t.working);add('stale',t.stale);add('',t.total-t.done-t.working-t.stale)}else for(const n of list){const s=status(n);seg.append(el('span',{class:s==='busy'?'working':s}))}
+  if(list.length>24){const add=(cls,count)=>{if(count)seg.append(el('span',{class:cls,style:'flex:'+count}))};add('done',t.done);add('working',t.working);add('',t.total-t.done-t.working)}else for(const n of list){const s=status(n);seg.append(el('span',{class:s==='busy'?'working':s}))}
   const parts=[el('b',{text:String(t.done)}),' of '+t.total+' done'];if(t.working)parts.push(' · '+t.working+' working');if(t.stale)parts.push(' · '+t.stale+' changed');
   return el('div',{class:'progress',role:'progressbar','aria-label':'Completed items','aria-valuenow':t.done,'aria-valuemin':0,'aria-valuemax':Math.max(1,t.total)},[seg,el('span',{class:'progress-text'},parts)])}
 function searchField(){const field=el('input',{type:'search',placeholder:'Find an item in this tree…','aria-label':'Search tree',oninput:e=>{query=e.target.value;renderBody()},onkeydown:e=>{if(e.key==='Escape'){searchOpen=false;query='';render()}}});field.value=query;return el('label',{class:'search'},[icon('search',14),field])}
@@ -311,7 +308,8 @@ function focusHeader(n){const h=el('header',{class:'focus'}),p=byId(n.parent_id)
   const up=button([icon('up',14),el('span',{class:'label',text:p.title})],()=>p.chat_id?openChat(p.chat_id):select(p.id),'parent-link',{title:'Open parent chat · '+path,'aria-label':'Open parent chat: '+p.title});
   h.append(el('div',{class:'bar'},[up,el('span',{class:'crumb-meta',text:'Item '+(index+1)+' of '+siblings.length+' · '+tally(siblings).done+' done'}),toolbar()]));
   const s=status(n),title=el('div',{class:'focus-title'},[checkButton(n,18),el('h1',{},[n.number?el('span',{class:'num',text:n.number}):null,n.title])]);
-  if(s==='working'||s==='stale'||s==='busy')title.append(el('span',{class:'pill '+(s==='stale'?'stale':'working'),text:stateText(n)}));
+  if(s==='working'||s==='busy')title.append(el('span',{class:'pill working',text:stateText(n)}));
+  if(n.stale)title.append(el('span',{class:'pill stale',text:STATUS_TEXT.stale}));
   h.append(title);if(searchOpen)h.append(searchField());return h}
 function displayModeButton(){const mode=displayMode==='fullscreen'?'inline':'fullscreen',label=mode==='inline'?'Show in chat':'Open in panel';return button(icon(mode==='inline'?'inline':'panel'),()=>action(()=>setDisplayMode(mode)),'icon-btn',{'aria-label':label,title:label})}
 function banners(){const stack=el('div',{class:'stack'});
@@ -336,8 +334,8 @@ function row(n){const kids=children(n),open=expanded.has(n.id),s=status(n),t=tal
   const end=el('div',{class:'row-end'});
   if(isCurrent(n))end.append(el('span',{class:'pill here',text:'This chat'}));
   else if(s==='working')end.append(el('span',{class:'pill working',text:'Working'}));
-  else if(s==='stale')end.append(el('span',{class:'pill stale',text:'Changed'}));
   else if(kids.length&&!open){const active=descendants(n).filter(x=>status(x)==='working'||status(x)==='busy').length;if(active)end.append(el('span',{class:'pill working',text:active+' working inside'}))}
+  if(n.stale)end.append(el('span',{class:'pill stale',text:'Changed',title:STATUS_TEXT.stale}));
   if(n.chat_id&&!isCurrent(n))end.append(button([icon('arrow',14)],()=>openChat(n.chat_id),'chat-btn reveal',{'aria-label':'Open chat: '+n.title,title:'Open chat',tabindex:'-1'}));
   else if(canStart(n)&&!starting.has(n.id)&&!n.locked_by)end.append(button([icon('play',10),'Start'],()=>start(n),'chat-btn start reveal',{'aria-label':'Start chat: '+n.title,title:'Create this item’s chat',tabindex:'-1'}));
   r.append(end);return r}

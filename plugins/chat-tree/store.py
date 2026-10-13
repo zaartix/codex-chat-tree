@@ -203,7 +203,7 @@ class Store:
         with self.connect() as db:
             roots = [dict(r) for r in db.execute('''SELECT r.*,
                 (SELECT COUNT(*) FROM nodes c WHERE c.parent_id=r.id) AS items,
-                (SELECT COUNT(*) FROM nodes c WHERE c.parent_id=r.id AND c.state IN ('done','closed') AND c.stale=0) AS done
+                (SELECT COUNT(*) FROM nodes c WHERE c.parent_id=r.id AND c.state IN ('done','closed')) AS done
                 FROM nodes r WHERE r.parent_id IS NULL ORDER BY r.updated DESC''')]
             current = db.execute('SELECT id,root_id FROM nodes WHERE chat_id=?', (chat_id,)).fetchone() if chat_id else None
             # An explicit tree choice wins over the chat's own tree, so linked chats can browse other trees.
@@ -225,6 +225,8 @@ class Store:
             numbers = self.numbers(db, root['id'])
             for n in nodes:
                 n['number'] = numbers.get(n['id'])
+                # An item without a chat has no work that a context change could make out of date.
+                n['stale'] = int(bool(n['stale'] and n['chat_id']))
                 n['results'] = [dict(r) for r in db.execute('SELECT * FROM results WHERE parent_id=? ORDER BY created', (n['id'],))]
                 n['runtime'] = runtime[n['chat_id']] if n['chat_id'] else None
                 lock = db.execute('SELECT operation_id FROM locks WHERE node_id=?', (n['id'],)).fetchone()
@@ -514,8 +516,9 @@ class Store:
                 if context_changed:
                     self._idle(db, branch, idle_actor)
                     own_context_changed = any(k in values and values[k] != node[k] for k in ('context','description'))
+                    # Only work already done in a chat can be out of date; a chat created later receives the new context.
                     for child in branch:
-                        if child['depth'] >= (1 if own_context_changed else 2):
+                        if child['chat_id'] and child['depth'] >= (1 if own_context_changed else 2):
                             db.execute('UPDATE nodes SET stale=1,updated=? WHERE id=?', (now, child['id']))
                 db.execute('UPDATE nodes SET ' + ','.join(k+'=?' for k in values) + ' WHERE id=?', (*values.values(), node['id']))
                 self._touch(db, node)
@@ -531,9 +534,10 @@ class Store:
                     raise TreeError('started_branch', 'Only branches without chats can be moved; started chats keep their parent settings. Rebuild the branch instead', chats=linked)
                 self._unlocked(db, [n['id'] for n in branch] + [parent['id']])
                 position = db.execute('SELECT COALESCE(MAX(position),-1)+1 FROM nodes WHERE parent_id=?', (parent['id'],)).fetchone()[0]
-                db.execute('UPDATE nodes SET parent_id=?,position=?,stale=1 WHERE id=?', (parent['id'], position, node['id']))
+                # A moved branch has no chats yet, so nothing in it is out of date: its chats start with the new context.
+                db.execute('UPDATE nodes SET parent_id=?,position=? WHERE id=?', (parent['id'], position, node['id']))
                 for child in branch:
-                    db.execute('UPDATE nodes SET stale=1,cwd=?,project_id=?,updated=? WHERE id=?', (parent['cwd'], parent['project_id'], now, child['id']))
+                    db.execute('UPDATE nodes SET cwd=?,project_id=?,updated=? WHERE id=?', (parent['cwd'], parent['project_id'], now, child['id']))
                 self._touch(db, node)
                 result = {'node_id': node['id']}
             elif action == 'reopen':
@@ -714,7 +718,8 @@ class Store:
             n = self.node(db, target)
             if n['chat_id'] and n['chat_id'] != chat_id:
                 raise TreeError('conflict', 'This item is already linked to another chat')
-            db.execute('UPDATE nodes SET chat_id=?,updated=? WHERE id=?', (chat_id, time.time(), target))
+            # The new chat starts with the current context.
+            db.execute('UPDATE nodes SET chat_id=?,stale=0,updated=? WHERE id=?', (chat_id, time.time(), target))
             if op['kind'] == 'start':
                 db.execute("UPDATE operations SET stage='done',updated=? WHERE id=?", (time.time(), operation_id))
                 db.execute('DELETE FROM locks WHERE operation_id=?', (operation_id,))
