@@ -45,11 +45,11 @@ A chat counts as busy while its Claude process is working; the server reads that
 
 ### Start
 
-1. An item that already has a chat: give its link, or open it with `open_session_in({session_id, target: "focus"})` when this chat started it.
+1. An item that already has a chat: give its link. Open it with `open_session_in` only when the user asks to go there now.
 2. A new item chat is created only from the chat of its immediate parent (the root chat for top-level items), because a new session inherits the settings of the session that creates it. Elsewhere `start` fails with `open_parent` and the parent link: tell the user to ask there.
 3. After claiming, call `tree_create_saved_chat` for the item. Call `start_session` with exactly the returned `start_session` arguments; do not add or change any. Its first message is the item card with the operation token; the new chat binds itself to the item and shows its outline without starting the task.
 4. Call `tree_step started` with `data: {node_id, chat_id}`, where `chat_id` is the session ID from `start_session`. The server verifies that folder, model, effort and permission mode match the parent. On a mismatch report it with the link; do not fix settings by hand or create another chat.
-5. Open the new chat with `open_session_in({session_id, target: "focus"})` and give its link.
+5. Give the link to the new chat; do not open it: the user may be working in another chat by the time creation finishes. Desktop also shows it nested under this chat in the sidebar.
 6. If `start_session` fails, calling `tree_create_saved_chat` again returns the same arguments; never create a second chat for an item that already has one.
 
 ### Summaries and completion

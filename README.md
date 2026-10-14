@@ -48,7 +48,7 @@ The installer adds the plugin through the Claude Code plugin manager; new sessio
 ## Use
 
 1. Discuss a plan with the agent, then say **"Create a Chat Tree from our plan."**
-2. Click **Start** on an item (in Claude, ask the agent to start it). In about ten seconds a new chat opens with the parent's project, model, reasoning, permissions and other settings. It starts with the item card and a panel of that item with a link back to its parent; every message there receives the item's context.
+2. Click **Start** on an item (in Claude, ask the agent to start it). In about ten seconds a new chat is ready with the parent's project, model, reasoning, permissions and other settings; open it from the notification or the item. Chat Tree never switches you away from the chat you are in. It starts with the item card and a panel of that item with a link back to its parent; every message there receives the item's context.
 3. Work in the item chat. It shows a quiet link to its parent and its own checklist, which can be broken down further in the same way.
 4. When the item is done, tell the agent or click **Complete**. Summaries are collected bottom-up, the result is delivered only to the immediate parent, and the item's chat is archived: done means archived. Open it again with one click on **Unarchive and open**; a new message there reopens the item.
 

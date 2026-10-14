@@ -39,9 +39,9 @@ Items whose chats were deleted in Codex leave the tree with their branch the nex
 
 ### Start
 
-1. Open an existing item `chat_id` with `navigate_to_codex_page`.
+1. For an item that already has a chat, give its `codex://threads/<chat_id>` link. Open it with `navigate_to_codex_page` only when the user asks to go there now.
 2. After claiming a new operation, call `tree_create_saved_chat` for its item. The panel Start button uses the same mechanism. The server forks the immediate parent settings before its first turn, verifies inheritance and binds the chat itself, then runs one short opening turn: its user message is the item card, and its agent shows `tree_panel` without starting the task. Open the parent first if needed. Stop if inheritance cannot be verified; do not substitute settings or create another chat outside the operation.
-3. Open the saved chat with `navigate_to_codex_page`; the server already names it. The prompt hook adds the branch context to every message in it.
+3. Give the link to the saved chat; do not open it with `navigate_to_codex_page`: the user may be working in another chat by the time creation finishes. The server already names it. The prompt hook adds the branch context to every message in it.
 4. Do not create another chat after failure: its UUID is saved in the item and journal. Inspect it with native `read_thread`. An operation with a UUID but no binding cannot be resumed: record `tree_step error` and report the chat link.
 
 ### Summaries and completion
